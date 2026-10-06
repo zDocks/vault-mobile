@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,15 +11,42 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import Constants from 'expo-constants';
 import { SafeAnimatedIcon } from '../src/components/SafeAnimatedIcon';
 import { Colors } from '../src/theme/colors';
 import { FontFamily } from '../src/theme/typography';
+import { appUpdatesApi, AppVersionInfo } from '../src/services/api';
+import { AppUpdateModal } from '../src/components/AppUpdateModal';
 
 const { width } = Dimensions.get('window');
 
 export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  const [availableUpdate, setAvailableUpdate] = useState<AppVersionInfo | null>(null);
+  const [isUpdateModalVisible, setIsUpdateModalVisible] = useState(false);
+
+  const localVersion = Constants.expoConfig?.version || '1.0.2';
+
+  useEffect(() => {
+    // Verifica atualizações automaticamente no ecrã de login
+    const checkUpdatesOnLogin = async () => {
+      try {
+        const info = await appUpdatesApi.checkVersion();
+        if (info && info.success && info.version) {
+          if (info.version !== localVersion) {
+            setAvailableUpdate(info);
+            setIsUpdateModalVisible(true);
+          }
+        }
+      } catch {
+        // Silencioso em caso de erro de rede no splash/login
+      }
+    };
+
+    checkUpdatesOnLogin();
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -77,6 +104,13 @@ export default function LoginScreen() {
           </View>
         </LinearGradient>
       </ImageBackground>
+
+      {/* Modal de Atualização da App (Visível logo no Login) */}
+      <AppUpdateModal
+        visible={isUpdateModalVisible}
+        onClose={() => setIsUpdateModalVisible(false)}
+        updateInfo={availableUpdate}
+      />
     </View>
   );
 }

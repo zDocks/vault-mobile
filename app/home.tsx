@@ -35,6 +35,7 @@ import { InvoiceScannerModal } from '../src/components/InvoiceScannerModal';
 import { Colors } from '../src/theme/colors';
 import { FontFamily } from '../src/theme/typography';
 import { dashboardApi, authApi, appUpdatesApi, AppVersionInfo, API_BASE_URL } from '../src/services/api';
+import { AppUpdateModal } from '../src/components/AppUpdateModal';
 import { getCurrentUser, UserSession } from '../src/services/session';
 import { formatCurrency } from '../src/utils/format';
 
@@ -69,7 +70,7 @@ export default function HomeScreen() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
 
-  const localVersion = Constants.expoConfig?.version || '1.0.0';
+  const localVersion = Constants.expoConfig?.version || '1.0.2';
 
   const checkForAppUpdates = async (silent = true) => {
     try {
@@ -475,15 +476,6 @@ export default function HomeScreen() {
                   <Text style={styles.assistantText}>Assistente</Text>
                 </TouchableOpacity>
               </View>
-
-              {/* Profile Avatar */}
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={styles.avatarButton}
-                onPress={() => setActiveTab('mais')}
-              >
-                <Text style={styles.avatarText}>{currentUser?.avatarChar || 'Z'}</Text>
-              </TouchableOpacity>
             </View>
 
             {/* Center Balance Content */}
@@ -704,83 +696,12 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Bottom Sheet de Nova Versão / Atualização (100% estilo Vault) */}
-      <Modal
+      {/* Modal de Atualização da App */}
+      <AppUpdateModal
         visible={isUpdateModalVisible}
-        transparent
-        statusBarTranslucent
-        animationType="slide"
-        onRequestClose={() => setIsUpdateModalVisible(false)}
-      >
-        <View style={styles.sheetOverlay}>
-          <TouchableWithoutFeedback onPress={() => setIsUpdateModalVisible(false)}>
-            <View style={styles.sheetBackdrop} />
-          </TouchableWithoutFeedback>
-
-          <View
-            style={[
-              styles.sheetContainer,
-              styles.updateSheetContainer,
-              { paddingBottom: Math.max(insets.bottom + 16, 28) },
-            ]}
-          >
-            {/* Drag Handle Bar */}
-            <View style={styles.sheetHandle} />
-
-            <View style={styles.updateSheetBody}>
-              {/* Badge no estilo Vault */}
-              <View style={styles.updateVaultBadge}>
-                <SparkleIcon size={14} color="#0B5244" />
-                <Text style={styles.updateVaultBadgeText}>NOVA VERSÃO DISPONÍVEL</Text>
-              </View>
-
-              {/* Title & Version Subtitle */}
-              <Text style={styles.updateVaultTitle}>
-                {availableUpdate?.title || 'Atualização do Sistema'}
-              </Text>
-              <Text style={styles.updateVaultVersionSubtitle}>
-                Versão {availableUpdate?.version} disponível
-              </Text>
-
-              {/* Release Notes List */}
-              {availableUpdate?.notes && availableUpdate.notes.length > 0 && (
-                <View style={styles.updateVaultNotesBox}>
-                  {availableUpdate.notes.map((note, idx) => (
-                    <View
-                      key={idx}
-                      style={[
-                        styles.updateVaultNoteItem,
-                        idx > 0 && styles.updateVaultNoteDivider,
-                      ]}
-                    >
-                      <View style={styles.updateVaultBullet} />
-                      <Text style={styles.updateVaultNoteText}>{note}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Primary Action Button (Preto Fosco / Luxo Vault) */}
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={styles.updateVaultPrimaryButton}
-                onPress={handleDownloadUpdate}
-              >
-                <Text style={styles.updateVaultPrimaryText}>Descarregar e Atualizar</Text>
-              </TouchableOpacity>
-
-              {/* Secondary Button */}
-              <TouchableOpacity
-                activeOpacity={0.6}
-                style={styles.updateVaultSecondaryButton}
-                onPress={() => setIsUpdateModalVisible(false)}
-              >
-                <Text style={styles.updateVaultSecondaryText}>Lembrar Mais Tarde</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setIsUpdateModalVisible(false)}
+        updateInfo={availableUpdate}
+      />
 
       {/* Modal de Digitalização de Faturas com Vault AI */}
       <InvoiceScannerModal

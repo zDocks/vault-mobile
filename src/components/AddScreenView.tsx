@@ -704,9 +704,9 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                 <ChevronLeftIcon size={24} color="#FFFFFF" />
               </TouchableOpacity>
 
-              <TouchableOpacity activeOpacity={0.8} style={styles.iconButton}>
+              {/* <TouchableOpacity activeOpacity={0.8} style={styles.iconButton}>
                 <ScannerIcon size={22} color="#FFFFFF" />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
 
             {/* Amount Display */}

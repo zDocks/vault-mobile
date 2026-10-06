@@ -71,7 +71,12 @@ jobs:
           files: build_output/vault.apk
           tag_name: ${{ github.ref_name }}
           name: Vault ${{ github.ref_name }}
-          generate_release_notes: true
+          body: |
+            - Novo ícone oficial e splash screen Vault
+            - Nome da aplicação atualizado para Vault
+            - Verificação de atualizações no ecrã de login
+            - Nova interface VIP de Gestão de Conta e Nuvem
+            - Ligação estável de produção à API api.zdocks.me
           draft: false
           prerelease: false
         env:

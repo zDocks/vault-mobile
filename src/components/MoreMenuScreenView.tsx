@@ -107,13 +107,13 @@ export const MoreMenuScreenView: React.FC<MoreMenuScreenViewProps> = ({
             <SearchIcon size={20} color="#111111" />
           </TouchableOpacity>
 
-          <TouchableOpacity
+          {/* <TouchableOpacity
             activeOpacity={0.7}
             style={styles.headerIconButton}
             onPress={() => setIsProfileOpen(true)}
           >
             <UserCircleIcon size={22} color="#111111" />
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
       </View>
 
@@ -286,6 +286,7 @@ export const MoreMenuScreenView: React.FC<MoreMenuScreenViewProps> = ({
         isCheckingUpdate={isCheckingUpdate}
         onCheckUpdate={onCheckUpdate}
         updateStatusMessage={updateStatusMessage}
+        onLogout={onLogout}
       />
     </View>
   );
