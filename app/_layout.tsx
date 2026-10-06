@@ -3,7 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StyleSheet, ActivityIndicator, View } from 'react-native';
+import { StyleSheet, ActivityIndicator, View, Text, TextInput } from 'react-native';
 import {
   useFonts,
   Exo_300Light,
@@ -16,6 +16,20 @@ import {
 } from '@expo-google-fonts/exo';
 
 import { enableFreeze } from 'react-native-screens';
+
+// Bloqueia a escala de fonte do sistema operativo (Android & iOS)
+// Impede que as definições de acessibilidade do utilizador aumentem ou deformem o layout
+if ((Text as any).defaultProps == null) {
+  (Text as any).defaultProps = {};
+}
+(Text as any).defaultProps.allowFontScaling = false;
+(Text as any).defaultProps.maxFontSizeMultiplier = 1;
+
+if ((TextInput as any).defaultProps == null) {
+  (TextInput as any).defaultProps = {};
+}
+(TextInput as any).defaultProps.allowFontScaling = false;
+(TextInput as any).defaultProps.maxFontSizeMultiplier = 1;
 
 // Desativa o congelamento de ecrãs no blur para evitar que o React 19 desmonte o conteúdo durante transições de saída
 enableFreeze(false);
