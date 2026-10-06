@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      EXPO_PUBLIC_API_URL: https://api.zdocks.me
 
     steps:
       - name: 📥 Checkout do Repositório
@@ -28,15 +30,21 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
+      - name: 🐘 Configurar Gradle com Cache inteligente
+        uses: gradle/actions/setup-gradle@v4
+
       - name: 📱 Aceitar Licenças do Android SDK
         run: yes | sdkmanager --licenses || true
 
       - name: 📦 Instalar Dependências
         run: npm install --legacy-peer-deps
 
+      - name: 🔐 Injetar Variáveis de Produção (.env)
+        run: |
+          echo "EXPO_PUBLIC_API_URL=https://api.zdocks.me" > .env
+          cat .env
+
       - name: ⚙️ Expo Prebuild (Gerar projeto Android nativo)
-        env:
-          EXPO_PUBLIC_API_URL: https://api.zdocks.me
         run: npx expo prebuild --platform android --clean
 
       - name: 🔨 Compilar APK Android (Release)

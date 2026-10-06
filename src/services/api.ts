@@ -2,23 +2,24 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getAuthToken, saveSession, clearSession } from './session';
 
-// Determina o IP base dinamicamente para funcionar em Nuvem (Cloudflare Tunnel), Expo Go e Dispositivo Físico
+// Determina a URL da API (Nuvem em Produção, dinâmico em desenvolvimento)
 const getBaseUrl = (): string => {
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, '');
   }
 
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    return `http://${ip}:3001`;
+  // Em modo de desenvolvimento local (Expo Go / simulador)
+  if (__DEV__) {
+    const hostUri = Constants.expoConfig?.hostUri;
+    if (hostUri) {
+      const ip = hostUri.split(':')[0];
+      return `http://${ip}:3001`;
+    }
+    return Platform.OS === 'android' ? 'http://10.0.2.2:3001' : 'http://localhost:3001';
   }
 
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:3001';
-  }
-
-  return 'http://192.168.1.81:3001';
+  // Em build de Produção (APK final instalado no telemóvel)
+  return 'https://api.zdocks.me';
 };
 
 export const API_BASE_URL = getBaseUrl();
