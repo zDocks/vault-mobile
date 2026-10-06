@@ -72,6 +72,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Vault ${{ github.ref_name }}
           body: |
+            - Bloqueio da escala de fontes do sistema para layout estável
             - Novo ícone oficial e splash screen Vault
             - Nome da aplicação atualizado para Vault
             - Verificação de atualizações no ecrã de login
