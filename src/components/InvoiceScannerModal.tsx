@@ -1,0 +1,1381 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Animated,
+  ScrollView,
+  Platform,
+  KeyboardAvoidingView,
+  Alert,
+  Dimensions,
+  Easing,
+  TouchableWithoutFeedback,
+} from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import Svg, { Path, Rect, Circle } from 'react-native-svg';
+import {
+  ScannerIcon,
+  CloseIcon,
+  SparkleIcon,
+  CheckIcon,
+  CameraIcon,
+  DocumentPdfIcon,
+  BackArrowIcon,
+  ChevronRightIcon,
+} from './Icons';
+import { Colors } from '../theme/colors';
+import { FontFamily } from '../theme/typography';
+import { aiApi, transactionsApi, entitiesApi, categoriesApi } from '../services/api';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Payment Method Custom Icons
+const CashPaymentIcon: React.FC<{ size?: number; color?: string }> = ({ size = 22, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="2" y="5" width="20" height="14" rx="3" stroke={color} strokeWidth="1.8" />
+    <Circle cx="12" cy="12" r="3" stroke={color} strokeWidth="1.8" />
+    <Path d="M6 9h.01M18 15h.01" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+  </Svg>
+);
+
+const MbwayPaymentIcon: React.FC<{ size?: number; color?: string }> = ({ size = 22, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="6" y="2.5" width="12" height="19" rx="3" stroke={color} strokeWidth="1.8" />
+    <Path d="M10 5.5h4M12 18h.01" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <Path d="M2.5 10l2 2-2 2M21.5 10l-2 2 2 2" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+const CardPaymentIcon: React.FC<{ size?: number; color?: string }> = ({ size = 22, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="2" y="4.5" width="20" height="15" rx="3" stroke={color} strokeWidth="1.8" />
+    <Path d="M2 9.5h20" stroke={color} strokeWidth="1.8" />
+    <Rect x="5" y="13.5" width="4.5" height="2.5" rx="0.5" fill={color} />
+  </Svg>
+);
+
+const TransferPaymentIcon: React.FC<{ size?: number; color?: string }> = ({ size = 22, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M3 9.5L12 4l9 5.5v1.5H3V9.5z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+    <Path d="M5.5 11v6M9.8 11v6M14.2 11v6M18.5 11v6" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+    <Path d="M2 18.5h20v2H2v-2z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+  </Svg>
+);
+
+export type PaymentMethodType = 'Dinheiro' | 'MB WAY' | 'Cartão' | 'Transferência';
+
+const PAYMENT_METHODS: Array<{
+  id: PaymentMethodType;
+  label: string;
+  desc: string;
+  icon: React.FC<{ size?: number; color?: string }>;
+}> = [
+  {
+    id: 'Dinheiro',
+    label: 'Dinheiro',
+    desc: 'Pagamento em numerário / notas',
+    icon: CashPaymentIcon,
+  },
+  {
+    id: 'MB WAY',
+    label: 'MB WAY',
+    desc: 'Pagamento por telemóvel / app MB WAY',
+    icon: MbwayPaymentIcon,
+  },
+  {
+    id: 'Cartão',
+    label: 'Cartão',
+    desc: 'Multibanco, débito ou crédito',
+    icon: CardPaymentIcon,
+  },
+  {
+    id: 'Transferência',
+    label: 'Transferência',
+    desc: 'Transferência bancária / IBAN',
+    icon: TransferPaymentIcon,
+  },
+];
+
+interface InvoiceScannerModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
+  visible,
+  onClose,
+  onSuccess,
+}) => {
+  const [modalRendered, setModalRendered] = useState(false);
+  const [step, setStep] = useState<'pick' | 'scanning' | 'review' | 'payment_method'>('pick');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>('Cartão');
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Scanned Fields
+  const [supplier, setSupplier] = useState('');
+  const [amount, setAmount] = useState('0.00');
+  const [category, setCategory] = useState('Fornecedores');
+  const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
+  const [description, setDescription] = useState('');
+  const [taxNumber, setTaxNumber] = useState<string | null>(null);
+  const [items, setItems] = useState<string[]>([]);
+
+  // Entity & Categories Metadata
+  const [existingEntities, setExistingEntities] = useState<Array<{ id: string; name: string }>>([]);
+  const [existingCategories, setExistingCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [isNewSupplier, setIsNewSupplier] = useState(false);
+
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const isClosingRef = useRef(false);
+
+  // Trigger animations on visible prop
+  useEffect(() => {
+    if (visible) {
+      isClosingRef.current = false;
+      setModalRendered(true);
+      fadeAnim.setValue(0);
+      slideAnim.setValue(SCREEN_HEIGHT);
+
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 260,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 300,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      loadMetadata();
+    } else if (modalRendered && !isClosingRef.current) {
+      closeWithAnimation();
+    }
+  }, [visible]);
+
+  // Pulse animation while scanning
+  useEffect(() => {
+    if (step === 'scanning') {
+      const pulseLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.35,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseLoop.start();
+      return () => pulseLoop.stop();
+    }
+  }, [step]);
+
+  const loadMetadata = async () => {
+    try {
+      const [entRes, catRes] = await Promise.all([
+        entitiesApi.getEntities('fornecedor'),
+        categoriesApi.getCategories('despesa'),
+      ]);
+
+      if (entRes?.success && entRes.entities) {
+        setExistingEntities(entRes.entities);
+      }
+      if (catRes?.success && catRes.categories) {
+        setExistingCategories(catRes.categories);
+      }
+    } catch (e) {
+      console.warn('⚠️ [Scanner Load Metadata Error]:', e);
+    }
+  };
+
+  const closeWithAnimation = (onCompleted?: () => void) => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setModalRendered(false);
+      handleReset();
+      onClose();
+      onCompleted?.();
+    });
+  };
+
+  const handleReset = () => {
+    setStep('pick');
+    setIsSaving(false);
+    setErrorMessage(null);
+    setSupplier('');
+    setAmount('0.00');
+    setCategory('Fornecedores');
+    setDate(new Date().toISOString().substring(0, 10));
+    setDescription('');
+    setTaxNumber(null);
+    setItems([]);
+    setIsNewSupplier(false);
+    setPaymentMethod('Cartão');
+  };
+
+  const checkSupplierStatus = (name: string, entitiesList = existingEntities) => {
+    const norm = name.trim().toLowerCase();
+    if (!norm) {
+      setIsNewSupplier(false);
+      return;
+    }
+
+    const match = entitiesList.find(
+      (e) =>
+        e.name.trim().toLowerCase() === norm ||
+        norm.includes(e.name.trim().toLowerCase()) ||
+        e.name.trim().toLowerCase().includes(norm)
+    );
+
+    setIsNewSupplier(!match);
+  };
+
+  const processImage = async (base64Data: string, mimeType: string = 'image/jpeg') => {
+    setStep('scanning');
+    setErrorMessage(null);
+
+    try {
+      const [res, entRes, catRes] = await Promise.all([
+        aiApi.scanInvoice(base64Data, mimeType),
+        entitiesApi.getEntities('fornecedor'),
+        categoriesApi.getCategories('despesa'),
+      ]);
+
+      const freshEntities = entRes?.entities || existingEntities;
+      if (entRes?.entities) setExistingEntities(entRes.entities);
+      if (catRes?.categories) setExistingCategories(catRes.categories);
+
+      if (res.success && res.invoice) {
+        const detectedName = res.invoice.supplier || 'Fornecedor';
+        setSupplier(detectedName);
+        setAmount(String(res.invoice.total || '0.00'));
+        setCategory(res.invoice.category || 'Fornecedores');
+        setDate(res.invoice.date || new Date().toISOString().substring(0, 10));
+        setDescription(res.invoice.description || 'Fatura processada com Vault AI');
+        setTaxNumber(res.invoice.taxNumber || null);
+        setItems(res.invoice.items || []);
+
+        checkSupplierStatus(detectedName, freshEntities);
+        setStep('review');
+      } else {
+        setErrorMessage(res.error || 'Não foi possível ler a fatura.');
+        setStep('pick');
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Erro ao processar imagem.');
+      setStep('pick');
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permissão necessária', 'Permita o acesso à câmara para digitalizar faturas.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        base64: true,
+        quality: 0.7,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.base64) {
+        await processImage(result.assets[0].base64, result.assets[0].mimeType || 'image/jpeg');
+      }
+    } catch (err: any) {
+      Alert.alert('Erro ao abrir câmara', err.message);
+    }
+  };
+
+  const handlePickFromGallery = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permissão necessária', 'Permita o acesso à galeria para selecionar uma fatura.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        base64: true,
+        quality: 0.7,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.base64) {
+        await processImage(result.assets[0].base64, result.assets[0].mimeType || 'image/jpeg');
+      }
+    } catch (err: any) {
+      Alert.alert('Erro ao abrir galeria', err.message);
+    }
+  };
+
+  const handlePickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        const fileName = (asset.name || '').toLowerCase();
+        const isPdf = fileName.endsWith('.pdf') || (asset.mimeType || '').includes('pdf');
+        const mimeType = asset.mimeType || (isPdf ? 'application/pdf' : 'image/jpeg');
+
+        // Ler ficheiro em Base64 através da API legada suportada do FileSystem
+        const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        if (base64Data) {
+          await processImage(base64Data, mimeType);
+        } else {
+          Alert.alert('Erro', 'Não foi possível ler o ficheiro selecionado.');
+        }
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [Pick Document Error]:', err);
+      Alert.alert('Erro ao selecionar documento', err.message || 'Falha ao aceder ao ficheiro.');
+    }
+  };
+
+  const handleProceedToPayment = () => {
+    const numAmount = parseFloat(amount.replace(',', '.'));
+    if (isNaN(numAmount) || numAmount <= 0) {
+      Alert.alert('Valor inválido', 'Por favor indique um montante positivo válido.');
+      return;
+    }
+
+    const cleanSupplier = supplier.trim();
+    if (!cleanSupplier) {
+      Alert.alert('Fornecedor obrigatório', 'Por favor indique o nome do fornecedor.');
+      return;
+    }
+
+    setStep('payment_method');
+  };
+
+  const handleConfirmAndSave = async (overrideMethod?: PaymentMethodType) => {
+    const numAmount = parseFloat(amount.replace(',', '.'));
+    if (isNaN(numAmount) || numAmount <= 0) {
+      Alert.alert('Valor inválido', 'Por favor indique um montante positivo válido.');
+      return;
+    }
+
+    const cleanSupplier = supplier.trim();
+    if (!cleanSupplier) {
+      Alert.alert('Fornecedor obrigatório', 'Por favor indique o nome do fornecedor.');
+      return;
+    }
+
+    const finalMethod = overrideMethod || paymentMethod || 'Cartão';
+
+    setIsSaving(true);
+    try {
+      // 1. Se for um novo fornecedor, cria primeiro a entidade no Vault
+      if (isNewSupplier) {
+        try {
+          await entitiesApi.createEntity(cleanSupplier, 'fornecedor', taxNumber || undefined);
+        } catch (entErr: any) {
+          console.warn('⚠️ [Create Entity warning]:', entErr.message);
+        }
+      }
+
+      // 2. Grava a despesa com o método de pagamento selecionado
+      const res = await transactionsApi.createTransaction({
+        type: 'despesa',
+        name: cleanSupplier,
+        amount: numAmount,
+        category: category.trim() || 'Fornecedores',
+        method: finalMethod,
+        isPaid: true,
+        paymentDate: date,
+        description: description.trim() || undefined,
+      });
+
+      if (res.success) {
+        closeWithAnimation(() => {
+          onSuccess();
+        });
+      } else {
+        Alert.alert('Erro ao gravar', res.error || 'Não foi possível gravar a despesa.');
+      }
+    } catch (err: any) {
+      Alert.alert('Erro ao gravar', err.message || 'Falha de comunicação.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (!modalRendered) return null;
+
+  return (
+    <Modal
+      visible={modalRendered}
+      transparent
+      statusBarTranslucent
+      animationType="none"
+      onRequestClose={() => closeWithAnimation()}
+    >
+      <View style={styles.rootOverlay}>
+        {/* Animated Fade Backdrop */}
+        <TouchableWithoutFeedback onPress={() => closeWithAnimation()}>
+          <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]} />
+        </TouchableWithoutFeedback>
+
+        {/* Animated Slide-in/Slide-out Bottom Sheet */}
+        <Animated.View
+          style={[
+            styles.sheetContainer,
+            { transform: [{ translateY: slideAnim }] },
+          ]}
+        >
+          {/* Sheet Handle */}
+          <View style={styles.sheetHandle} />
+
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              {step === 'payment_method' && (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.headerBackBtn}
+                  onPress={() => setStep('review')}
+                >
+                  <BackArrowIcon size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+              <View style={styles.headerTitleWrap}>
+                <View style={styles.aiBadge}>
+                  <SparkleIcon size={14} color="#00D09E" />
+                  <Text style={styles.aiBadgeText}>
+                    {step === 'payment_method' ? 'PAGAMENTO' : 'VAULT AI OCR'}
+                  </Text>
+                </View>
+                <Text style={styles.headerTitle}>
+                  {step === 'review'
+                    ? 'Confirmar Fatura'
+                    : step === 'payment_method'
+                    ? 'Método de Pagamento'
+                    : 'Digitalizar Fatura'}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.7}
+              style={styles.closeButton}
+              onPress={() => closeWithAnimation()}
+            >
+              <CloseIcon size={20} color="rgba(255, 255, 255, 0.7)" />
+            </TouchableOpacity>
+          </View>
+
+          {errorMessage && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          )}
+
+          {/* ================= STEP 1: PICK IMAGE / DOCUMENT ================= */}
+          {step === 'pick' && (
+            <View style={styles.contentWrap}>
+              <Text style={styles.subtitle}>
+                Escolhe o método de envio da fatura ou recibo. O Vault AI extrai automaticamente o fornecedor, montante, artigos e categoria.
+              </Text>
+
+              <View style={styles.optionsList}>
+                {/* 1. Câmara */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={styles.optionRowCard}
+                  onPress={handleTakePhoto}
+                >
+                  <View style={styles.optionIconCircle}>
+                    <CameraIcon size={24} color="#00D09E" />
+                  </View>
+                  <View style={styles.optionTextWrap}>
+                    <Text style={styles.optionTitle}>Tirar Foto</Text>
+                    <Text style={styles.optionDesc}>Fotografar recibo físico em papel</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* 2. Galeria de Fotos */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={styles.optionRowCard}
+                  onPress={handlePickFromGallery}
+                >
+                  <View style={styles.optionIconCircle}>
+                    <ScannerIcon size={22} color="#00D09E" />
+                  </View>
+                  <View style={styles.optionTextWrap}>
+                    <Text style={styles.optionTitle}>Galeria de Fotos</Text>
+                    <Text style={styles.optionDesc}>Foto guardada na galeria ou Google Fotos</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* 3. Documento / Ficheiro PDF */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={styles.optionRowCard}
+                  onPress={handlePickDocument}
+                >
+                  <View style={styles.optionIconCircle}>
+                    <DocumentPdfIcon size={22} color="#00D09E" />
+                  </View>
+                  <View style={styles.optionTextWrap}>
+                    <Text style={styles.optionTitle}>Documento / Ficheiro PDF</Text>
+                    <Text style={styles.optionDesc}>Fatura digital descarregada online (PDF)</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* ================= STEP 2: SCANNING IN PROGRESS ================= */}
+          {step === 'scanning' && (
+            <View style={styles.scanningWrap}>
+              <Animated.View style={[styles.scanIconPulse, { opacity: pulseAnim }]}>
+                <ScannerIcon size={46} color="#00D09E" />
+              </Animated.View>
+              <ActivityIndicator size="large" color="#00D09E" style={{ marginTop: 22 }} />
+              <Text style={styles.scanningTitle}>A Processar com Vault AI...</Text>
+              <Text style={styles.scanningDesc}>
+                A extrair o fornecedor, montante total, categoria e detalhes através de visão computacional inteligente.
+              </Text>
+            </View>
+          )}
+
+          {/* ================= STEP 3: REVIEW & CONFIRM ================= */}
+          {step === 'review' && (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={{ flexShrink: 1 }}
+            >
+              <ScrollView
+                style={styles.reviewScroll}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.reviewContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {/* Notice Banner */}
+                <View style={styles.successBanner}>
+                  <CheckIcon size={16} color="#00D09E" />
+                  <Text style={styles.successBannerText}>
+                    Revê as informações antes de gravar no Vault
+                  </Text>
+                </View>
+
+                {/* Amount Card */}
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>Montante Total (€)</Text>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={amount}
+                    onChangeText={setAmount}
+                    keyboardType="numeric"
+                    placeholder="0.00"
+                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  />
+                </View>
+
+                {/* Supplier & Status */}
+                <View style={styles.fieldBlock}>
+                  <View style={styles.labelRow}>
+                    <Text style={styles.fieldLabel}>Fornecedor / Entidade</Text>
+                    {isNewSupplier ? (
+                      <View style={styles.newBadgePill}>
+                        <SparkleIcon size={11} color="#00D09E" />
+                        <Text style={styles.newBadgeText}>Novo Fornecedor</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.existingBadgePill}>
+                        <CheckIcon size={11} color="#34D399" />
+                        <Text style={styles.existingBadgeText}>Já Registado</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <TextInput
+                    style={styles.textInputField}
+                    value={supplier}
+                    onChangeText={(val) => {
+                      setSupplier(val);
+                      checkSupplierStatus(val);
+                    }}
+                    placeholder="Nome do comerciante/fornecedor"
+                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  />
+
+                  {isNewSupplier && (
+                    <View style={styles.newSupplierNoticeBox}>
+                      <Text style={styles.newSupplierNoticeText}>
+                        💡 Este fornecedor ainda não existe no teu sistema. O Vault irá criá-lo automaticamente na tua lista de entidades.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Category Selection with Quick Chips */}
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>Categoria da Despesa</Text>
+                  {existingCategories.length > 0 && (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.categoryPillsScroll}
+                    >
+                      {existingCategories.map((cat) => {
+                        const isSelected = category.toLowerCase() === cat.name.toLowerCase();
+                        return (
+                          <TouchableOpacity
+                            key={cat.id}
+                            activeOpacity={0.75}
+                            style={[
+                              styles.categoryPill,
+                              isSelected && styles.categoryPillSelected,
+                            ]}
+                            onPress={() => setCategory(cat.name)}
+                          >
+                            <Text
+                              style={[
+                                styles.categoryPillText,
+                                isSelected && styles.categoryPillTextSelected,
+                              ]}
+                            >
+                              {cat.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  )}
+                  <TextInput
+                    style={styles.textInputField}
+                    value={category}
+                    onChangeText={setCategory}
+                    placeholder="Categoria"
+                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  />
+                </View>
+
+                {/* Date */}
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>Data da Fatura</Text>
+                  <TextInput
+                    style={styles.textInputField}
+                    value={date}
+                    onChangeText={setDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  />
+                </View>
+
+                {/* Description */}
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>Descrição / Notas</Text>
+                  <TextInput
+                    style={[styles.textInputField, { height: 60, textAlignVertical: 'top' }]}
+                    value={description}
+                    onChangeText={setDescription}
+                    multiline
+                    placeholder="Resumo do que foi comprado..."
+                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  />
+                </View>
+
+                {/* Detected Items */}
+                {items.length > 0 && (
+                  <View style={styles.itemsBlock}>
+                    <Text style={styles.itemsLabel}>Artigos Identificados:</Text>
+                    {items.map((it, idx) => (
+                      <Text key={idx} style={styles.itemBullet}>
+                        • {it}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+
+                {/* Action Buttons */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={styles.saveButton}
+                  onPress={handleProceedToPayment}
+                >
+                  <Text style={styles.saveButtonText}>
+                    Confirmar e Escolher Pagamento
+                  </Text>
+                  <ChevronRightIcon size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.rescanButton}
+                  onPress={() => setStep('pick')}
+                >
+                  <Text style={styles.rescanButtonText}>Digitalizar Outra Fatura</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </KeyboardAvoidingView>
+          )}
+
+          {/* ================= STEP 4: PAYMENT METHOD SELECTION ================= */}
+          {step === 'payment_method' && (
+            <ScrollView
+              style={styles.paymentScroll}
+              contentContainerStyle={styles.paymentContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Invoice Summary Box */}
+              <View style={styles.paymentSummaryCard}>
+                <View style={styles.paymentSummaryTop}>
+                  <Text style={styles.paymentSummaryLabel}>FATURA CONFIRMADA</Text>
+                  <Text style={styles.paymentSummaryAmount}>
+                    {parseFloat(amount.replace(',', '.') || '0').toFixed(2)} €
+                  </Text>
+                </View>
+                <View style={styles.paymentSummaryDetails}>
+                  <Text style={styles.paymentSummarySupplier} numberOfLines={1}>
+                    {supplier || 'Fornecedor'}
+                  </Text>
+                  <Text style={styles.paymentSummaryCategory}>
+                    {category} • {date}
+                  </Text>
+                </View>
+                {isNewSupplier && (
+                  <View style={styles.paymentNewEntityTag}>
+                    <SparkleIcon size={12} color="#00D09E" />
+                    <Text style={styles.paymentNewEntityText}>
+                      Será adicionado aos teus fornecedores
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.paymentHeaderBlock}>
+                <Text style={styles.paymentPromptTitle}>
+                  Qual foi o método de pagamento?
+                </Text>
+                <Text style={styles.paymentPromptDesc}>
+                  Indica a forma de pagamento para registar a despesa:
+                </Text>
+              </View>
+
+              {/* 4 Payment Options */}
+              <View style={styles.paymentMethodsList}>
+                {PAYMENT_METHODS.map((pm) => {
+                  const isSelected = paymentMethod === pm.id;
+                  const IconComponent = pm.icon;
+                  return (
+                    <TouchableOpacity
+                      key={pm.id}
+                      activeOpacity={0.8}
+                      style={[
+                        styles.paymentMethodCard,
+                        isSelected && styles.paymentMethodCardSelected,
+                      ]}
+                      onPress={() => setPaymentMethod(pm.id)}
+                    >
+                      <View
+                        style={[
+                          styles.paymentIconWrap,
+                          isSelected && styles.paymentIconWrapSelected,
+                        ]}
+                      >
+                        <IconComponent
+                          size={22}
+                          color={isSelected ? '#00D09E' : '#FFFFFF'}
+                        />
+                      </View>
+
+                      <View style={styles.paymentTextWrap}>
+                        <Text
+                          style={[
+                            styles.paymentMethodTitle,
+                            isSelected && styles.paymentMethodTitleSelected,
+                          ]}
+                        >
+                          {pm.label}
+                        </Text>
+                        <Text style={styles.paymentMethodDesc}>{pm.desc}</Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.radioCircle,
+                          isSelected && styles.radioCircleSelected,
+                        ]}
+                      >
+                        {isSelected && <View style={styles.radioInnerDot} />}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Confirm & Save Button */}
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+                onPress={() => handleConfirmAndSave(paymentMethod)}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <CheckIcon size={18} color="#FFFFFF" />
+                    <Text style={styles.saveButtonText}>
+                      Gravar Despesa ({paymentMethod})
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Return to review */}
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={styles.backToReviewButton}
+                onPress={() => setStep('review')}
+                disabled={isSaving}
+              >
+                <BackArrowIcon size={16} color="rgba(255, 255, 255, 0.7)" />
+                <Text style={styles.backToReviewText}>Voltar e alterar dados da fatura</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
+
+const styles = StyleSheet.create({
+  rootOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+  },
+  sheetContainer: {
+    backgroundColor: '#02231E',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    maxHeight: '90%',
+    paddingBottom: 28,
+  },
+  sheetHandle: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  headerTitleWrap: {
+    gap: 4,
+  },
+  aiBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  aiBadgeText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 11,
+    color: '#00D09E',
+    letterSpacing: 0.5,
+  },
+  headerTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 19,
+    color: '#FFFFFF',
+  },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contentWrap: {
+    padding: 22,
+    gap: 16,
+  },
+  subtitle: {
+    fontFamily: FontFamily.regular,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.72)',
+    lineHeight: 19,
+  },
+  optionsList: {
+    gap: 12,
+    marginTop: 4,
+  },
+  optionRowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 208, 158, 0.22)',
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 14,
+  },
+  optionIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 208, 158, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  optionTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+  optionDesc: {
+    fontFamily: FontFamily.regular,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.55)',
+  },
+  scanningWrap: {
+    padding: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanIconPulse: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: 'rgba(0, 208, 158, 0.15)',
+    borderWidth: 2,
+    borderColor: '#00D09E',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanningTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 17,
+    color: '#FFFFFF',
+    marginTop: 18,
+  },
+  scanningDesc: {
+    fontFamily: FontFamily.regular,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 18,
+    maxWidth: 290,
+  },
+  reviewScroll: {
+    paddingHorizontal: 20,
+  },
+  reviewContent: {
+    paddingTop: 16,
+    paddingBottom: 20,
+    gap: 13,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0, 208, 158, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 158, 0.3)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  successBannerText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 12,
+    color: '#00D09E',
+  },
+  fieldBlock: {
+    gap: 6,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  fieldLabel: {
+    fontFamily: FontFamily.medium,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.68)',
+  },
+  newBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0, 208, 158, 0.15)',
+    borderWidth: 1,
+    borderColor: '#00D09E',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  newBadgeText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 10,
+    color: '#00D09E',
+  },
+  existingBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  existingBadgeText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 10,
+    color: '#34D399',
+  },
+  newSupplierNoticeBox: {
+    backgroundColor: 'rgba(0, 84, 69, 0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 158, 0.25)',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 4,
+  },
+  newSupplierNoticeText: {
+    fontFamily: FontFamily.regular,
+    fontSize: 11,
+    color: '#E0FFF6',
+    lineHeight: 16,
+  },
+  amountInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.5,
+    borderColor: '#00D09E',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontFamily: FontFamily.bold,
+    fontSize: 22,
+    color: '#00D09E',
+  },
+  textInputField: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontFamily: FontFamily.medium,
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  categoryPillsScroll: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  categoryPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  categoryPillSelected: {
+    backgroundColor: '#005445',
+    borderColor: '#00D09E',
+  },
+  categoryPillText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  categoryPillTextSelected: {
+    fontFamily: FontFamily.bold,
+    color: '#FFFFFF',
+  },
+  itemsBlock: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    padding: 12,
+    borderRadius: 12,
+    gap: 4,
+  },
+  itemsLabel: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.5)',
+    textTransform: 'uppercase',
+  },
+  itemBullet: {
+    fontFamily: FontFamily.regular,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#005445',
+    borderWidth: 1.5,
+    borderColor: '#00D09E',
+    borderRadius: 18,
+    paddingVertical: 14,
+    marginTop: 6,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+  rescanButton: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  rescanButtonText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  errorBanner: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    padding: 10,
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderRadius: 10,
+  },
+  errorText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 12,
+    color: '#EF4444',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  headerBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentScroll: {
+    paddingHorizontal: 20,
+  },
+  paymentContent: {
+    paddingTop: 16,
+    paddingBottom: 24,
+    gap: 14,
+  },
+  paymentSummaryCard: {
+    backgroundColor: 'rgba(0, 84, 69, 0.3)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 158, 0.3)',
+    borderRadius: 18,
+    padding: 16,
+    gap: 6,
+  },
+  paymentSummaryTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  paymentSummaryLabel: {
+    fontFamily: FontFamily.bold,
+    fontSize: 11,
+    color: '#00D09E',
+    letterSpacing: 0.6,
+  },
+  paymentSummaryAmount: {
+    fontFamily: FontFamily.bold,
+    fontSize: 22,
+    color: '#00D09E',
+  },
+  paymentSummaryDetails: {
+    gap: 2,
+  },
+  paymentSummarySupplier: {
+    fontFamily: FontFamily.bold,
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
+  paymentSummaryCategory: {
+    fontFamily: FontFamily.regular,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  paymentNewEntityTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0, 208, 158, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  paymentNewEntityText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 11,
+    color: '#00D09E',
+  },
+  paymentHeaderBlock: {
+    gap: 4,
+  },
+  paymentPromptTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
+  paymentPromptDesc: {
+    fontFamily: FontFamily.regular,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.65)',
+    lineHeight: 17,
+  },
+  paymentMethodsList: {
+    gap: 10,
+  },
+  paymentMethodCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  paymentMethodCardSelected: {
+    backgroundColor: 'rgba(0, 208, 158, 0.12)',
+    borderColor: '#00D09E',
+  },
+  paymentIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentIconWrapSelected: {
+    backgroundColor: 'rgba(0, 208, 158, 0.22)',
+  },
+  paymentTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  paymentMethodTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+  paymentMethodTitleSelected: {
+    color: '#00D09E',
+  },
+  paymentMethodDesc: {
+    fontFamily: FontFamily.regular,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.55)',
+  },
+  radioCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioCircleSelected: {
+    borderColor: '#00D09E',
+  },
+  radioInnerDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    backgroundColor: '#00D09E',
+  },
+  backToReviewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+  },
+  backToReviewText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+});
