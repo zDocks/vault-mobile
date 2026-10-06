@@ -358,18 +358,89 @@ export interface AppVersionInfo {
   downloadUrl: string;
 }
 
+/**
+ * Compara duas versões semânticas (ex: '1.0.2' e '1.0.1').
+ * Retorna true APENAS se remote for estritamente mais recente que local.
+ */
+export function isNewerVersion(remote: string, local: string): boolean {
+  if (!remote || !local) return false;
+  const parse = (v: string) =>
+    v
+      .replace(/^v/i, '')
+      .split('.')
+      .map((n) => parseInt(n, 10) || 0);
+
+  const [rMaj = 0, rMin = 0, rPat = 0] = parse(remote);
+  const [lMaj = 0, lMin = 0, lPat = 0] = parse(local);
+
+  if (rMaj > lMaj) return true;
+  if (rMaj < lMaj) return false;
+  if (rMin > lMin) return true;
+  if (rMin < lMin) return false;
+  return rPat > lPat;
+}
+
 export const appUpdatesApi = {
   checkVersion: async (): Promise<AppVersionInfo | null> => {
+    // 1. Tenta obter metadados via backend
     try {
-      const response = await fetch(`${API_BASE_URL}/api/app/version`);
-      if (!response.ok) return null;
-      return await response.json();
+      const response = await fetch(`${API_BASE_URL}/api/app/version`, {
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      if (response.ok) {
+        const data: AppVersionInfo = await response.json();
+        // Se o backend responder com versão válida e superior a 1.0.0, usamos
+        if (data && data.success && data.version && isNewerVersion(data.version, '1.0.0')) {
+          return data;
+        }
+      }
     } catch {
-      return null;
+      // Ignora erro de rede e continua para fallback direto do GitHub
     }
+
+    // 2. Fallback direto à API pública de Releases do GitHub (sempre atualizada)
+    try {
+      const ghResponse = await fetch(
+        'https://api.github.com/repos/zDocks/vault-mobile/releases/latest',
+        { headers: { Accept: 'application/vnd.github.v3+json' } }
+      );
+      if (ghResponse.ok) {
+        const ghData: any = await ghResponse.json();
+        const rawTag = (ghData.tag_name || '').replace(/^v/i, '');
+        const apkAsset = (ghData.assets || []).find((a: any) =>
+          a.name.toLowerCase().endsWith('.apk')
+        );
+
+        let notes: string[] = [];
+        if (ghData.body) {
+          notes = ghData.body
+            .split('\n')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l.length > 0)
+            .map((l: string) => l.replace(/^[-*•]\s*/, ''))
+            .filter((l: string) => l.length > 0 && !l.startsWith('#'));
+        }
+
+        return {
+          success: true,
+          version: rawTag,
+          versionCode: parseInt(rawTag.replace(/\./g, ''), 10) || 1,
+          releaseDate: ghData.published_at ? ghData.published_at.split('T')[0] : '',
+          title: ghData.name || `Vault v${rawTag}`,
+          notes: notes.length > 0 ? notes : ['Melhorias de desempenho e estabilidade'],
+          downloadUrl:
+            apkAsset?.browser_download_url ||
+            `https://github.com/zDocks/vault-mobile/releases/download/v${rawTag}/vault.apk`,
+        };
+      }
+    } catch {
+      // Falha total de ligação
+    }
+
+    return null;
   },
   getDownloadUrl: (): string => {
-    return `${API_BASE_URL}/api/app/download`;
+    return 'https://github.com/zDocks/vault-mobile/releases/latest';
   },
 };
 

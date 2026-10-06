@@ -15,7 +15,7 @@ import Constants from 'expo-constants';
 import { SafeAnimatedIcon } from '../src/components/SafeAnimatedIcon';
 import { Colors } from '../src/theme/colors';
 import { FontFamily } from '../src/theme/typography';
-import { appUpdatesApi, AppVersionInfo } from '../src/services/api';
+import { appUpdatesApi, AppVersionInfo, isNewerVersion } from '../src/services/api';
 import { AppUpdateModal } from '../src/components/AppUpdateModal';
 
 const { width } = Dimensions.get('window');
@@ -35,7 +35,7 @@ export default function LoginScreen() {
       try {
         const info = await appUpdatesApi.checkVersion();
         if (info && info.success && info.version) {
-          if (info.version !== localVersion) {
+          if (isNewerVersion(info.version, localVersion)) {
             setAvailableUpdate(info);
             setIsUpdateModalVisible(true);
           }

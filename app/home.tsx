@@ -34,7 +34,7 @@ import { MoreMenuScreenView } from '../src/components/MoreMenuScreenView';
 import { InvoiceScannerModal } from '../src/components/InvoiceScannerModal';
 import { Colors } from '../src/theme/colors';
 import { FontFamily } from '../src/theme/typography';
-import { dashboardApi, authApi, appUpdatesApi, AppVersionInfo, API_BASE_URL } from '../src/services/api';
+import { dashboardApi, authApi, appUpdatesApi, AppVersionInfo, isNewerVersion, API_BASE_URL } from '../src/services/api';
 import { AppUpdateModal } from '../src/components/AppUpdateModal';
 import { getCurrentUser, UserSession } from '../src/services/session';
 import { formatCurrency } from '../src/utils/format';
@@ -77,7 +77,7 @@ export default function HomeScreen() {
       if (!silent) setIsCheckingUpdate(true);
       const info = await appUpdatesApi.checkVersion();
       if (info && info.success && info.version) {
-        if (info.version !== localVersion) {
+        if (isNewerVersion(info.version, localVersion)) {
           setAvailableUpdate(info);
           setIsUpdateModalVisible(true);
           return;
