@@ -843,7 +843,9 @@ export default function StatisticsScreen() {
               <View style={styles.recorrenteCol}>
                 <Text style={styles.recorrenteBigVal}>{formatEuro(recorrentes.totalRecorrentes)}</Text>
                 <Text style={styles.recorrenteSubLabel}>
-                  {recorrentes.countRecorrentes || 0} despesas recorrentes ativas
+                  {recorrentes.countRecorrentes === 1
+                    ? '1 encargo fixo mensal ativo'
+                    : `${recorrentes.countRecorrentes || 0} encargos fixos ativos`}
                 </Text>
               </View>
               <View style={styles.recorrenteBadge}>
