@@ -336,7 +336,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
   const PAYMENT_OPTIONS = ['Multibanco', 'Dinheiro', 'MBWay', 'Transferência'];
 
   // Step Recorrente
-  const [isRecurring, setIsRecurring] = useState<boolean>(true);
+  const [isRecurring, setIsRecurring] = useState<boolean>(false);
   const [recurringInterval, setRecurringInterval] = useState<string>('Mensal');
   const RECURRING_OPTIONS = ['Diário', 'Mensal', 'Trimestral', 'Anual'];
 
@@ -575,7 +575,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
     // Reset paid & recurring
     setIsPaid(true);
     setPaymentMethod('Multibanco');
-    setIsRecurring(true);
+    setIsRecurring(false);
     setRecurringInterval('Mensal');
     // Reset date to today
     const freshToday = new Date();

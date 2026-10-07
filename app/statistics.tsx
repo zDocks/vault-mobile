@@ -880,10 +880,12 @@ export default function StatisticsScreen() {
                         )}
                       </View>
                       <Text style={styles.recorrenteItemSub}>
-                        {item.category} • {item.count} pagamentos (média {formatEuro(item.avgAmount)})
+                        {item.category} • {item.count > 0 ? `${item.count} ${item.count === 1 ? 'pagamento' : 'pagamentos'}` : 'Compromisso ativo'} • {formatEuro(item.unitAmount ?? item.avgAmount)}/mês
                       </Text>
                     </View>
-                    <Text style={styles.recorrenteItemTotal}>{formatEuro(item.total)}</Text>
+                    <Text style={styles.recorrenteItemTotal}>
+                      {formatEuro(item.count > 0 ? item.total : (item.unitAmount ?? item.avgAmount))}
+                    </Text>
                   </View>
                 ))}
               </View>

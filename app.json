@@ -3,7 +3,7 @@
     "name": "Vault",
     "slug": "vault-mobile",
     "scheme": "vault",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -17,16 +17,16 @@
     },
     "android": {
       "package": "com.zdocks.vault",
-      "versionCode": 4,
+      "versionCode": 5,
       "splash": {
         "image": "./assets/splash-icon.png",
         "resizeMode": "contain",
         "backgroundColor": "#1E1E1E"
       },
       "adaptiveIcon": {
-        "backgroundColor": "#121212",
+        "backgroundColor": "#232323",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/icon.png",
+        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false

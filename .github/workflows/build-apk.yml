@@ -72,12 +72,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Vault ${{ github.ref_name }}
           body: |
-            - Bloqueio da escala de fontes do sistema para layout estável
-            - Novo ícone oficial e splash screen Vault
-            - Nome da aplicação atualizado para Vault
-            - Verificação de atualizações no ecrã de login
-            - Nova interface VIP de Gestão de Conta e Nuvem
-            - Ligação estável de produção à API api.zdocks.me
+            - Novo Icon
+            - Melhoria no algoritmo de deteção de custos fixos e recorrentes
+            - Correção do valor padrão de recorrência ao criar despesa
+            - Exibição de valores mensais fixos exatos sem médias nas estatísticas
           draft: false
           prerelease: false
         env:
