@@ -72,10 +72,11 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Vault ${{ github.ref_name }}
           body: |
-            - Novo Icon
-            - Melhoria no algoritmo de deteção de custos fixos e recorrentes
-            - Correção do valor padrão de recorrência ao criar despesa
-            - Exibição de valores mensais fixos exatos sem médias nas estatísticas
+            - Calibração estrita do algoritmo de custos fixos e recorrentes
+            - Exclusão absoluta de fornecedores e compras variáveis dos encargos fixos
+            - Deteção por meses consecutivos sem intervalo, mesmo valor e mesma data
+            - Correção do valor total de compromissos ativos nos KPIs de estatísticas (sem 0,00 € indevido)
+            - Novo Icon e splash screen oficial Vault
           draft: false
           prerelease: false
         env:

@@ -70,7 +70,7 @@ export default function HomeScreen() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
 
-  const localVersion = Constants.expoConfig?.version || '1.0.5';
+  const localVersion = Constants.expoConfig?.version || '1.0.6';
 
   const checkForAppUpdates = async (silent = true) => {
     try {

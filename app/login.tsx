@@ -27,7 +27,7 @@ export default function LoginScreen() {
   const [availableUpdate, setAvailableUpdate] = useState<AppVersionInfo | null>(null);
   const [isUpdateModalVisible, setIsUpdateModalVisible] = useState(false);
 
-  const localVersion = Constants.expoConfig?.version || '1.0.5';
+  const localVersion = Constants.expoConfig?.version || '1.0.6';
 
   useEffect(() => {
     // Verifica atualizações automaticamente no ecrã de login
