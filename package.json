@@ -1,6 +1,6 @@
 {
   "name": "vault-mobile",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo-google-fonts/exo": "^0.4.2",

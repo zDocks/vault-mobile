@@ -25,6 +25,7 @@ import {
   CloseIcon,
 } from './Icons';
 import { transactionsApi, categoriesApi, entitiesApi } from '../services/api';
+import { scheduleInvoicePaymentReminders } from '../services/notifications';
 
 interface AddScreenViewProps {
   onClose: () => void;
@@ -294,12 +295,12 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
 
   const dateScrollRef = useRef<ScrollView>(null);
 
-  // Faixa contínua de dias centrada no dia de hoje (-90 a +90 dias)
+  // Faixa contínua de dias (-60 a +180 dias)
   const [allDays] = useState(() => {
     const days: { date: Date; dayNum: number; dayName: string; key: string }[] = [];
     const base = new Date();
     base.setHours(0, 0, 0, 0);
-    for (let offset = -90; offset <= 90; offset++) {
+    for (let offset = -60; offset <= 180; offset++) {
       const d = new Date(base);
       d.setDate(base.getDate() + offset);
       days.push({
@@ -347,7 +348,8 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
     paid: boolean
   ): WizardStepType[] => {
     const lower = cat.toLowerCase().trim();
-    const dateSteps: WizardStepType[] = paid ? ['date'] : [];
+    // Sempre inclui o passo 'date': se pago é a data de pagamento, se pendente é a data limite de pagamento
+    const dateSteps: WizardStepType[] = ['date'];
 
     if (type === 'despesa') {
       if (lower === 'vencimentos') {
@@ -444,6 +446,48 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
     const newMonth = (currentMonthIndex + (direction === 'next' ? 1 : -1) + 12) % 12;
     setCurrentMonthIndex(newMonth);
     const targetIdx = allDays.findIndex((d) => d.date.getMonth() === newMonth);
+    if (targetIdx !== -1) {
+      dateScrollRef.current?.scrollTo({
+        x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
+        animated: true,
+      });
+    }
+  };
+
+  const handleQuickDueDate = (daysToAdd: number) => {
+    const base = new Date();
+    base.setDate(base.getDate() + daysToAdd);
+    base.setHours(0, 0, 0, 0);
+    setSelectedDate(base);
+    setCurrentMonthIndex(base.getMonth());
+
+    const targetIdx = allDays.findIndex(
+      (d) =>
+        d.date.getFullYear() === base.getFullYear() &&
+        d.date.getMonth() === base.getMonth() &&
+        d.date.getDate() === base.getDate()
+    );
+    if (targetIdx !== -1) {
+      dateScrollRef.current?.scrollTo({
+        x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
+        animated: true,
+      });
+    }
+  };
+
+  const handleEndOfMonthDueDate = () => {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    lastDay.setHours(0, 0, 0, 0);
+    setSelectedDate(lastDay);
+    setCurrentMonthIndex(lastDay.getMonth());
+
+    const targetIdx = allDays.findIndex(
+      (d) =>
+        d.date.getFullYear() === lastDay.getFullYear() &&
+        d.date.getMonth() === lastDay.getMonth() &&
+        d.date.getDate() === lastDay.getDate()
+    );
     if (targetIdx !== -1) {
       dateScrollRef.current?.scrollTo({
         x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
@@ -606,17 +650,28 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
         entityName = expenseName || selectedCategory;
       }
 
-      await transactionsApi.createTransaction({
+      const res = await transactionsApi.createTransaction({
         type: transactionType,
         name: entityName,
         amount: parseFloat(amount.replace(',', '.')) || 0,
         category: selectedCategory,
         method: isPaid ? paymentMethod : undefined,
         isPaid: isPaid,
+        status: isPaid ? 'pago' : 'pendente',
         isRecurring: isRecurring,
         paymentDate: isPaid ? selectedDate.toISOString() : new Date().toISOString(),
+        dueDate: !isPaid ? selectedDate.toISOString().substring(0, 10) : undefined,
         description: description || undefined,
       });
+
+      if (!isPaid && res?.transaction?.id) {
+        await scheduleInvoicePaymentReminders({
+          id: res.transaction.id,
+          name: entityName,
+          amount: parseFloat(amount.replace(',', '.')) || 0,
+          dueDate: selectedDate.toISOString().substring(0, 10),
+        });
+      }
     } catch (e) {
       console.log('Error creating transaction in DB:', e);
     }
@@ -1197,7 +1252,14 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
               {/* SCREEN: DATA */}
               {currentScreen === 'date' && (
                 <View style={styles.stepContentCentered}>
-                  <Text style={styles.screenTitleCentered}>Data</Text>
+                  <Text style={styles.screenTitleCentered}>
+                    {isPaid ? 'Data' : 'Data Limite'}
+                  </Text>
+                  {!isPaid && (
+                    <Text style={styles.screenSubtitle}>
+                      Até que dia tem de ser feito o pagamento?
+                    </Text>
+                  )}
 
                   {/* Month Navigation */}
                   <View style={styles.monthNavRow}>
@@ -1286,6 +1348,42 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                       })}
                     </ScrollView>
                   </View>
+
+                  {!isPaid && (
+                    <View style={styles.quickDateChipsRow}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        style={styles.quickChip}
+                        onPress={() => handleQuickDueDate(7)}
+                      >
+                        <Text style={styles.quickChipText}>+7 dias</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        style={styles.quickChip}
+                        onPress={() => handleQuickDueDate(15)}
+                      >
+                        <Text style={styles.quickChipText}>+15 dias</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        style={styles.quickChip}
+                        onPress={() => handleQuickDueDate(30)}
+                      >
+                        <Text style={styles.quickChipText}>+30 dias</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        style={styles.quickChip}
+                        onPress={handleEndOfMonthDueDate}
+                      >
+                        <Text style={styles.quickChipText}>Fim do Mês</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -1340,7 +1438,13 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                         styles.yesNoButton,
                         !isPaid ? styles.yesNoButtonActive : styles.yesNoButtonInactive,
                       ]}
-                      onPress={() => setIsPaid(false)}
+                      onPress={() => {
+                        setIsPaid(false);
+                        const future = new Date();
+                        future.setDate(future.getDate() + 15);
+                        setSelectedDate(future);
+                        setCurrentMonthIndex(future.getMonth());
+                      }}
                     >
                       <Text
                         style={[
@@ -1354,13 +1458,20 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                   </View>
 
                   {/* Tambor Wheel Picker via Snapping Native ScrollView */}
-                  {isPaid && (
+                  {isPaid ? (
                     <View style={styles.tamborWrapper}>
                       <DrumWheelPicker
                         options={PAYMENT_OPTIONS}
                         selectedValue={paymentMethod}
                         onSelect={setPaymentMethod}
                       />
+                    </View>
+                  ) : (
+                    <View style={styles.pendingNoticeWrapper}>
+                      <Text style={styles.pendingNoticeTitle}>Fatura Pendente</Text>
+                      <Text style={styles.pendingNoticeDesc}>
+                        No próximo passo poderás escolher a data limite para receber lembretes de pagamento.
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -2081,5 +2192,50 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.semiBold,
     fontSize: 17,
     color: '#FFFFFF',
+  },
+  pendingNoticeWrapper: {
+    marginTop: 24,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 184, 0, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 184, 0, 0.3)',
+    width: '90%',
+    alignItems: 'center',
+    gap: 4,
+  },
+  pendingNoticeTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 14,
+    color: '#FFB800',
+  },
+  pendingNoticeDesc: {
+    fontFamily: FontFamily.regular,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  quickDateChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 18,
+    paddingHorizontal: 20,
+  },
+  quickChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  quickChipText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 12,
+    color: '#00D09E',
   },
 });

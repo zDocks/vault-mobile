@@ -29,6 +29,9 @@ import {
   DocumentPdfIcon,
   BackArrowIcon,
   ChevronRightIcon,
+  ChevronLeftIcon,
+  ClockIcon,
+  CalendarIcon,
 } from './Icons';
 import { Colors } from '../theme/colors';
 import { FontFamily } from '../theme/typography';
@@ -36,6 +39,59 @@ import { aiApi, transactionsApi, entitiesApi, categoriesApi } from '../services/
 import { scheduleInvoicePaymentReminders } from '../services/notifications';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const MONTH_NAMES = [
+  'Janeiro',
+  'Fevereiro',
+  'Março',
+  'Abril',
+  'Maio',
+  'Junho',
+  'Julho',
+  'Agosto',
+  'Setembro',
+  'Outubro',
+  'Novembro',
+  'Dezembro',
+];
+
+const WEEK_DAYS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
+
+const DAY_ITEM_WIDTH = 52;
+
+const parseDateString = (str?: string): Date => {
+  if (!str) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  }
+  const parts = str.split('-');
+  if (parts.length === 3) {
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+      const dt = new Date(y, m, d);
+      dt.setHours(0, 0, 0, 0);
+      return dt;
+    }
+  }
+  const dt = new Date(str);
+  if (!isNaN(dt.getTime())) {
+    dt.setHours(0, 0, 0, 0);
+    return dt;
+  }
+  const fallback = new Date();
+  fallback.setHours(0, 0, 0, 0);
+  return fallback;
+};
+
+const formatDateToIso = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 // Payment Method Custom Icons
 const CashPaymentIcon: React.FC<{ size?: number; color?: string }> = ({ size = 22, color = '#FFFFFF' }) => (
@@ -78,31 +134,31 @@ const PAYMENT_METHODS: Array<{
   desc: string;
   icon: React.FC<{ size?: number; color?: string }>;
 }> = [
-  {
-    id: 'Dinheiro',
-    label: 'Dinheiro',
-    desc: 'Pagamento em numerário / notas',
-    icon: CashPaymentIcon,
-  },
-  {
-    id: 'MB WAY',
-    label: 'MB WAY',
-    desc: 'Pagamento por telemóvel / app MB WAY',
-    icon: MbwayPaymentIcon,
-  },
-  {
-    id: 'Cartão',
-    label: 'Cartão',
-    desc: 'Multibanco, débito ou crédito',
-    icon: CardPaymentIcon,
-  },
-  {
-    id: 'Transferência',
-    label: 'Transferência',
-    desc: 'Transferência bancária / IBAN',
-    icon: TransferPaymentIcon,
-  },
-];
+    {
+      id: 'Dinheiro',
+      label: 'Dinheiro',
+      desc: 'Pagamento em numerário / notas',
+      icon: CashPaymentIcon,
+    },
+    {
+      id: 'MB WAY',
+      label: 'MB WAY',
+      desc: 'Pagamento por telemóvel / app MB WAY',
+      icon: MbwayPaymentIcon,
+    },
+    {
+      id: 'Cartão',
+      label: 'Cartão',
+      desc: 'Multibanco, débito ou crédito',
+      icon: CardPaymentIcon,
+    },
+    {
+      id: 'Transferência',
+      label: 'Transferência',
+      desc: 'Transferência bancária / IBAN',
+      icon: TransferPaymentIcon,
+    },
+  ];
 
 interface InvoiceScannerModalProps {
   visible: boolean;
@@ -148,6 +204,124 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
     const now = new Date();
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     setDueDate(lastDay.toISOString().substring(0, 10));
+  };
+
+  // DatePicker state (Funcionalidades completas do DatePicker da app)
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [datePickerTarget, setDatePickerTarget] = useState<'invoiceDate' | 'dueDate'>('dueDate');
+  const [pickerSelectedDate, setPickerSelectedDate] = useState<Date>(new Date());
+  const [pickerMonthIndex, setPickerMonthIndex] = useState(new Date().getMonth());
+  const pickerScrollRef = useRef<ScrollView>(null);
+
+  const pickerFadeAnim = useRef(new Animated.Value(0)).current;
+  const pickerSlideAnim = useRef(new Animated.Value(450)).current;
+
+  // Faixa contínua de dias (-60 a +180 dias) centrada no dia de hoje
+  const pickerDays = React.useMemo(() => {
+    const days: { date: Date; dayNum: number; dayName: string; key: string; time: number }[] = [];
+    const base = new Date();
+    base.setHours(0, 0, 0, 0);
+    for (let offset = -60; offset <= 180; offset++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() + offset);
+      d.setHours(0, 0, 0, 0);
+      days.push({
+        date: d,
+        dayNum: d.getDate(),
+        dayName: WEEK_DAYS[d.getDay()],
+        key: `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`,
+        time: d.getTime(),
+      });
+    }
+    return days;
+  }, []);
+
+  const openDatePicker = (target: 'invoiceDate' | 'dueDate') => {
+    setDatePickerTarget(target);
+    const initialDate = parseDateString(target === 'dueDate' ? dueDate : date);
+    setPickerSelectedDate(initialDate);
+    setPickerMonthIndex(initialDate.getMonth());
+    setIsDatePickerOpen(true);
+
+    pickerFadeAnim.setValue(0);
+    pickerSlideAnim.setValue(450);
+    Animated.parallel([
+      Animated.timing(pickerFadeAnim, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(pickerSlideAnim, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Auto-scroll suave para a data selecionada ao abrir
+    setTimeout(() => {
+      const selTime = initialDate.getTime();
+      const targetIdx = pickerDays.findIndex((d) => d.time === selTime);
+      if (targetIdx !== -1) {
+        pickerScrollRef.current?.scrollTo({
+          x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
+          animated: false,
+        });
+      }
+    }, 80);
+  };
+
+  const closeDatePicker = () => {
+    Animated.parallel([
+      Animated.timing(pickerFadeAnim, {
+        toValue: 0,
+        duration: 150,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(pickerSlideAnim, {
+        toValue: 450,
+        duration: 180,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setIsDatePickerOpen(false);
+    });
+  };
+
+  const handleConfirmPickerDate = () => {
+    const formatted = formatDateToIso(pickerSelectedDate);
+    if (datePickerTarget === 'dueDate') {
+      setDueDate(formatted);
+    } else {
+      setDate(formatted);
+    }
+    closeDatePicker();
+  };
+
+  const handlePickerScroll = (e: any) => {
+    const scrollX = e.nativeEvent.contentOffset.x;
+    const centerIdx = Math.round((scrollX + 140) / DAY_ITEM_WIDTH);
+    const clampedIdx = Math.max(0, Math.min(centerIdx, pickerDays.length - 1));
+    const month = pickerDays[clampedIdx].date.getMonth();
+    if (month !== pickerMonthIndex) {
+      setPickerMonthIndex(month);
+    }
+  };
+
+  const handlePickerMonthNav = (direction: 'next' | 'prev') => {
+    const newMonth = (pickerMonthIndex + (direction === 'next' ? 1 : -1) + 12) % 12;
+    setPickerMonthIndex(newMonth);
+    const targetIdx = pickerDays.findIndex((d) => d.date.getMonth() === newMonth);
+    if (targetIdx !== -1) {
+      pickerScrollRef.current?.scrollTo({
+        x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
+        animated: true,
+      });
+    }
   };
 
   // Entity & Categories Metadata
@@ -226,7 +400,7 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
         setExistingCategories(catRes.categories);
       }
     } catch (e) {
-      console.warn('⚠️ [Scanner Load Metadata Error]:', e);
+      console.warn('[Scanner Load Metadata Error]:', e);
     }
   };
 
@@ -401,7 +575,7 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
         }
       }
     } catch (err: any) {
-      console.warn('⚠️ [Pick Document Error]:', err);
+      console.warn('[Pick Document Error]:', err);
       Alert.alert('Erro ao selecionar documento', err.message || 'Falha ao aceder ao ficheiro.');
     }
   };
@@ -451,7 +625,7 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
         try {
           await entitiesApi.createEntity(cleanSupplier, 'fornecedor', taxNumber || undefined);
         } catch (entErr: any) {
-          console.warn('⚠️ [Create Entity warning]:', entErr.message);
+          console.warn('[Create Entity warning]:', entErr.message);
         }
       }
 
@@ -546,10 +720,10 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                   {step === 'review'
                     ? 'Confirmar Fatura'
                     : step === 'payment_method'
-                    ? isPaid
-                      ? 'Método de Pagamento'
-                      : 'Pagamento Pendente'
-                    : 'Digitalizar Fatura'}
+                      ? isPaid
+                        ? 'Método de Pagamento'
+                        : 'Pagamento Pendente'
+                      : 'Digitalizar Fatura'}
                 </Text>
               </View>
             </View>
@@ -702,8 +876,9 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
 
                   {isNewSupplier && (
                     <View style={styles.newSupplierNoticeBox}>
+                      <SparkleIcon size={14} color="#00D09E" />
                       <Text style={styles.newSupplierNoticeText}>
-                        💡 Este fornecedor ainda não existe no teu sistema. O Vault irá criá-lo automaticamente na tua lista de entidades.
+                        Este fornecedor ainda não existe no teu sistema. O Vault irá criá-lo automaticamente na tua lista de entidades.
                       </Text>
                     </View>
                   )}
@@ -755,13 +930,17 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                 {/* Date */}
                 <View style={styles.fieldBlock}>
                   <Text style={styles.fieldLabel}>Data da Fatura</Text>
-                  <TextInput
-                    style={styles.textInputField}
-                    value={date}
-                    onChangeText={setDate}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                  />
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={styles.datePickerInputTrigger}
+                    onPress={() => openDatePicker('invoiceDate')}
+                  >
+                    <CalendarIcon size={16} color="#00D09E" />
+                    <Text style={styles.datePickerInputText}>
+                      {date || 'Selecionar data'}
+                    </Text>
+                    <ChevronRightIcon size={14} color="rgba(255, 255, 255, 0.4)" />
+                  </TouchableOpacity>
                 </View>
 
                 {/* Description */}
@@ -876,13 +1055,14 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                     ]}
                     onPress={() => setIsPaid(false)}
                   >
+                    <ClockIcon size={16} color={!isPaid ? '#FFB800' : 'rgba(255, 255, 255, 0.6)'} />
                     <Text
                       style={[
                         styles.paymentStatusToggleText,
                         !isPaid && styles.paymentStatusToggleTextPendingActive,
                       ]}
                     >
-                      ⏳ Fica Pendente
+                      Fica Pendente
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -964,14 +1144,21 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                   </View>
 
                   <View style={styles.dueDateInputWrap}>
-                    <Text style={styles.fieldLabel}>Data Limite (YYYY-MM-DD)</Text>
-                    <TextInput
-                      style={styles.textInputField}
-                      value={dueDate}
-                      onChangeText={setDueDate}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                    />
+                    <View style={styles.dueDateLabelRow}>
+                      <CalendarIcon size={14} color="#00D09E" />
+                      <Text style={styles.fieldLabel}>Data Limite (YYYY-MM-DD)</Text>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      style={styles.datePickerInputTrigger}
+                      onPress={() => openDatePicker('dueDate')}
+                    >
+                      <CalendarIcon size={16} color="#00D09E" />
+                      <Text style={styles.datePickerInputText}>
+                        {dueDate || 'Selecionar data limite'}
+                      </Text>
+                      <ChevronRightIcon size={14} color="rgba(255, 255, 255, 0.4)" />
+                    </TouchableOpacity>
                   </View>
 
                   {/* Atalhos rápidos de data limite */}
@@ -1019,7 +1206,7 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                         Lembretes Automáticos Diários
                       </Text>
                       <Text style={styles.notificationNoticeDesc}>
-                        A app enviará uma notificação diária a partir de 2 dias antes da data limite, mesmo com a app fechada ou o telemóvel bloqueado. Ao tocares no aviso, irás diretamente para esta fatura.
+                        Será notificado a partir de 2 dias antes da data limite.
                       </Text>
                     </View>
                   </View>
@@ -1064,6 +1251,122 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
             </ScrollView>
           )}
         </Animated.View>
+
+        {/* ================= DATEPICKER OVERLAY BOTTOM SHEET ================= */}
+        {isDatePickerOpen && (
+          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            {/* Backdrop with Fade */}
+            <TouchableWithoutFeedback onPress={closeDatePicker}>
+              <Animated.View
+                style={[
+                  styles.pickerBackdrop,
+                  { opacity: pickerFadeAnim },
+                ]}
+              />
+            </TouchableWithoutFeedback>
+
+            {/* Bottom Sheet Card */}
+            <Animated.View
+              style={[
+                styles.datePickerSheet,
+                { transform: [{ translateY: pickerSlideAnim }] },
+              ]}
+            >
+              {/* Top Handle */}
+              <View style={styles.sheetHandleContainer}>
+                <View style={styles.sheetHandleDark} />
+              </View>
+
+              {/* Month Navigation Row */}
+              <View style={styles.modalMonthNavRow}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.navSquareButton}
+                  onPress={() => handlePickerMonthNav('prev')}
+                >
+                  <ChevronLeftIcon size={22} color="#111111" />
+                </TouchableOpacity>
+
+                <Text style={styles.modalMonthTitle}>
+                  {MONTH_NAMES[pickerMonthIndex]}
+                </Text>
+
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.navSquareButton}
+                  onPress={() => handlePickerMonthNav('next')}
+                >
+                  <ChevronRightIcon size={22} color="#111111" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Continuous Horizontal ScrollView of days */}
+              <View style={styles.daysScrollViewWrapper}>
+                <ScrollView
+                  ref={pickerScrollRef}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  onScroll={handlePickerScroll}
+                  scrollEventThrottle={32}
+                  contentContainerStyle={styles.daysScrollContent}
+                >
+                  {pickerDays.map((item) => {
+                    const selTime = pickerSelectedDate.getTime();
+                    const diff = Math.round((item.time - selTime) / 86400000);
+                    const isSelected = diff === 0;
+                    const isFullyOpaque = isSelected || Math.abs(diff) <= 2;
+
+                    return (
+                      <TouchableOpacity
+                        key={`picker-${item.key}`}
+                        activeOpacity={0.75}
+                        style={[
+                          styles.dayColumn,
+                          isSelected && styles.dayColumnActive,
+                          !isFullyOpaque && styles.dayColumnDimmed,
+                        ]}
+                        onPress={() => {
+                          setPickerSelectedDate(item.date);
+                          setPickerMonthIndex(item.date.getMonth());
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dayNameText,
+                            isSelected && styles.dayNameTextActive,
+                            !isFullyOpaque && styles.dayTextDimmed,
+                          ]}
+                        >
+                          {item.dayName}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.dayNumText,
+                            isSelected && styles.dayNumTextActive,
+                            !isFullyOpaque && styles.dayTextDimmed,
+                          ]}
+                        >
+                          {item.dayNum}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {/* Confirmar Data Button */}
+              <View style={styles.pickerConfirmButtonWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.pickerConfirmButton}
+                  onPress={handleConfirmPickerDate}
+                >
+                  <Text style={styles.pickerConfirmButtonText}>Confirmar Data</Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -1278,6 +1581,9 @@ const styles = StyleSheet.create({
     color: '#34D399',
   },
   newSupplierNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     backgroundColor: 'rgba(0, 84, 69, 0.35)',
     borderWidth: 1,
     borderColor: 'rgba(0, 208, 158, 0.25)',
@@ -1286,6 +1592,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   newSupplierNoticeText: {
+    flex: 1,
     fontFamily: FontFamily.regular,
     fontSize: 11,
     color: '#E0FFF6',
@@ -1616,6 +1923,11 @@ const styles = StyleSheet.create({
   dueDateInputWrap: {
     gap: 6,
   },
+  dueDateLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   quickDateChipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1670,5 +1982,146 @@ const styles = StyleSheet.create({
   saveButtonPending: {
     backgroundColor: '#D97706',
     borderColor: '#F59E0B',
+  },
+
+  // DatePicker Trigger & Modal Styles
+  datePickerInputTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  datePickerInputText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 15,
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  pickerBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  sheetHandleContainer: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  datePickerSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
+    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 24,
+    zIndex: 9999,
+  },
+  sheetHandleDark: {
+    width: 46,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#D1D1D6',
+  },
+  modalMonthNavRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    marginTop: 18,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  navSquareButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#1E1E1E',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalMonthTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 24,
+    color: '#111111',
+  },
+  daysScrollViewWrapper: {
+    width: '100%',
+    marginBottom: 24,
+  },
+  daysScrollContent: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  dayColumn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: DAY_ITEM_WIDTH,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 14,
+  },
+  dayColumnActive: {
+    backgroundColor: '#1E2524',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRadius: 14,
+    opacity: 1,
+  },
+  dayColumnDimmed: {
+    opacity: 0.35,
+  },
+  dayNameText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 11,
+    color: '#8E8E93',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  dayNameTextActive: {
+    color: '#FFFFFF',
+    opacity: 0.9,
+  },
+  dayNumText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 20,
+    color: '#111111',
+  },
+  dayNumTextActive: {
+    color: '#FFFFFF',
+  },
+  dayTextDimmed: {
+    opacity: 0.6,
+  },
+  pickerConfirmButtonWrap: {
+    width: '100%',
+    paddingHorizontal: 8,
+  },
+  pickerConfirmButton: {
+    backgroundColor: '#1E1E1E',
+    borderRadius: 28,
+    height: 54,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+  },
+  pickerConfirmButtonText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 18,
+    color: '#FFFFFF',
   },
 });

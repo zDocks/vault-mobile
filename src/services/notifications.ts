@@ -27,7 +27,7 @@ if (!isExpoGo || Platform.OS !== 'android') {
       });
     }
   } catch (err: any) {
-    console.warn('⚠️ [expo-notifications indisponível no Expo Go Android]:', err?.message);
+    console.warn('[expo-notifications indisponível no Expo Go Android]:', err?.message);
     Notifications = null;
   }
 }
@@ -55,7 +55,7 @@ export async function setupNotificationChannel(): Promise<void> {
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   } catch (err: any) {
-    console.warn('⚠️ [Setup Notification Channel Error]:', err?.message);
+    console.warn('[Setup Notification Channel Error]:', err?.message);
   }
 }
 
@@ -79,7 +79,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     }
     return true;
   } catch (err: any) {
-    console.warn('⚠️ [Request Notification Permissions Error]:', err?.message);
+    console.warn('[Request Notification Permissions Error]:', err?.message);
     return false;
   }
 }
@@ -116,14 +116,14 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
   if (!invoice.dueDate) return;
 
   if (!Notifications) {
-    console.log(`🔔 [Lembrete de Pagamento]: Agendado virtualmente para ${invoice.name} (${invoice.amount}€) com data limite ${invoice.dueDate}. (No APK final, acorda o ecrã bloqueado)`);
+    console.log(`[Lembrete de Pagamento]: Agendado virtualmente para ${invoice.name} (${invoice.amount}€) com data limite ${invoice.dueDate}. (No APK final, acorda o ecrã bloqueado)`);
     return;
   }
 
   try {
     const hasPerm = await requestNotificationPermissions();
     if (!hasPerm) {
-      console.warn('⚠️ [Notifications]: Permissão de notificações não concedida.');
+      console.warn('[Notifications]: Permissão de notificações não concedida.');
       return;
     }
 
@@ -162,7 +162,7 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
         }
       }
 
-      let title = '⚠️ Lembrete de Pagamento';
+      let title = 'Lembrete de Pagamento';
       let body = '';
 
       if (offset === -2) {
@@ -170,8 +170,8 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
       } else if (offset === -1) {
         body = `Falta 1 dia para a data limite do pagamento de ${invoice.name} (${formattedAmount} €).`;
       } else {
-        title = '🚨 Data Limite de Pagamento Hoje!';
-        body = `Hoje é a data limite do pagamento de ${invoice.name} (${formattedAmount} €)!`;
+        title = 'Data Limite de Pagamento Hoje';
+        body = `Hoje é a data limite do pagamento de ${invoice.name} (${formattedAmount} €).`;
       }
 
       const identifier = `vault_due_${invoice.id}_day_${offset}`;
@@ -201,10 +201,10 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
         },
       });
 
-      console.log(`🔔 [Notification Scheduled]: ${identifier} para ${new Date(targetTime).toLocaleString('pt-PT')}`);
+      console.log(`[Notification Scheduled]: ${identifier} para ${new Date(targetTime).toLocaleString('pt-PT')}`);
     }
   } catch (err: any) {
-    console.warn('⚠️ [Schedule Notification Error]:', err?.message);
+    console.warn('[Schedule Notification Error]:', err?.message);
   }
 }
 
@@ -220,9 +220,9 @@ export async function cancelInvoiceReminders(transactionId: string): Promise<voi
       const identifier = `vault_due_${transactionId}_day_${offset}`;
       await Notifications.cancelScheduledNotificationAsync(identifier);
     }
-    console.log(`🔕 [Notifications Cancelled]: Lembretes da fatura ${transactionId} removidos.`);
+    console.log(`[Notifications Cancelled]: Lembretes da fatura ${transactionId} removidos.`);
   } catch (err: any) {
-    console.warn('⚠️ [Cancel Notification Error]:', err?.message);
+    console.warn('[Cancel Notification Error]:', err?.message);
   }
 }
 
