@@ -59,6 +59,7 @@ export interface TransactionDTO {
   avatarChar: string;
   isPaid: boolean;
   status: 'pago' | 'pendente' | 'atrasada';
+  dueDate?: string | null;
   isRecurring: boolean;
   createdAt: string;
 }
@@ -198,10 +199,12 @@ export const transactionsApi = {
     category?: string;
     method?: string;
     isPaid: boolean;
+    status?: 'pago' | 'pendente';
+    dueDate?: string;
     isRecurring?: boolean;
     paymentDate?: string;
     description?: string;
-  }) => {
+  }): Promise<{ success: boolean; transaction?: any; error?: string }> => {
     try {
       const response = await authFetch(`${API_BASE_URL}/api/transactions`, {
         method: 'POST',

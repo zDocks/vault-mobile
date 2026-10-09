@@ -33,6 +33,7 @@ import {
 import { Colors } from '../theme/colors';
 import { FontFamily } from '../theme/typography';
 import { aiApi, transactionsApi, entitiesApi, categoriesApi } from '../services/api';
+import { scheduleInvoicePaymentReminders } from '../services/notifications';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -128,6 +129,26 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
   const [description, setDescription] = useState('');
   const [taxNumber, setTaxNumber] = useState<string | null>(null);
   const [items, setItems] = useState<string[]>([]);
+
+  // Payment status & Due Date for Invoices
+  const [isPaid, setIsPaid] = useState<boolean>(true);
+  const [dueDate, setDueDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 15);
+    return d.toISOString().substring(0, 10);
+  });
+
+  const setQuickDueDate = (daysToAdd: number) => {
+    const base = new Date();
+    base.setDate(base.getDate() + daysToAdd);
+    setDueDate(base.toISOString().substring(0, 10));
+  };
+
+  const setEndOfMonthDueDate = () => {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setDueDate(lastDay.toISOString().substring(0, 10));
+  };
 
   // Entity & Categories Metadata
   const [existingEntities, setExistingEntities] = useState<Array<{ id: string; name: string }>>([]);
@@ -247,6 +268,10 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
     setItems([]);
     setIsNewSupplier(false);
     setPaymentMethod('Cartão');
+    setIsPaid(true);
+    const d = new Date();
+    d.setDate(d.getDate() + 15);
+    setDueDate(d.toISOString().substring(0, 10));
   };
 
   const checkSupplierStatus = (name: string, entitiesList = existingEntities) => {
@@ -286,7 +311,13 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
         setSupplier(detectedName);
         setAmount(String(res.invoice.total || '0.00'));
         setCategory(res.invoice.category || 'Fornecedores');
-        setDate(res.invoice.date || new Date().toISOString().substring(0, 10));
+        const invDate = res.invoice.date || new Date().toISOString().substring(0, 10);
+        setDate(invDate);
+        const parsedBase = new Date(invDate);
+        const baseForDue = isNaN(parsedBase.getTime()) ? new Date() : parsedBase;
+        baseForDue.setDate(baseForDue.getDate() + 15);
+        setDueDate(baseForDue.toISOString().substring(0, 10));
+        setIsPaid(true);
         setDescription(res.invoice.description || 'Fatura processada com Vault AI');
         setTaxNumber(res.invoice.taxNumber || null);
         setItems(res.invoice.items || []);
@@ -404,6 +435,13 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
       return;
     }
 
+    if (!isPaid) {
+      if (!dueDate || !dueDate.trim()) {
+        Alert.alert('Data limite necessária', 'Por favor indica a data limite de pagamento (YYYY-MM-DD).');
+        return;
+      }
+    }
+
     const finalMethod = overrideMethod || paymentMethod || 'Cartão';
 
     setIsSaving(true);
@@ -417,19 +455,31 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
         }
       }
 
-      // 2. Grava a despesa com o método de pagamento selecionado
+      // 2. Grava a despesa com o método de pagamento selecionado ou como pendente
       const res = await transactionsApi.createTransaction({
         type: 'despesa',
         name: cleanSupplier,
         amount: numAmount,
         category: category.trim() || 'Fornecedores',
-        method: finalMethod,
-        isPaid: true,
-        paymentDate: date,
+        method: isPaid ? finalMethod : undefined,
+        isPaid: isPaid,
+        status: isPaid ? 'pago' : 'pendente',
+        paymentDate: isPaid ? date : undefined,
+        dueDate: !isPaid ? dueDate.trim() : undefined,
         description: description.trim() || undefined,
       });
 
       if (res.success) {
+        // Se for fatura pendente, agenda os lembretes automáticos no SO
+        if (!isPaid && res.transaction?.id) {
+          await scheduleInvoicePaymentReminders({
+            id: res.transaction.id,
+            name: cleanSupplier,
+            amount: numAmount,
+            dueDate: dueDate.trim(),
+          });
+        }
+
         closeWithAnimation(() => {
           onSuccess();
         });
@@ -485,14 +535,20 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                 <View style={styles.aiBadge}>
                   <SparkleIcon size={14} color="#00D09E" />
                   <Text style={styles.aiBadgeText}>
-                    {step === 'payment_method' ? 'PAGAMENTO' : 'VAULT AI OCR'}
+                    {step === 'payment_method'
+                      ? isPaid
+                        ? 'PAGAMENTO'
+                        : 'PENDENTE'
+                      : 'VAULT AI OCR'}
                   </Text>
                 </View>
                 <Text style={styles.headerTitle}>
                   {step === 'review'
                     ? 'Confirmar Fatura'
                     : step === 'payment_method'
-                    ? 'Método de Pagamento'
+                    ? isPaid
+                      ? 'Método de Pagamento'
+                      : 'Pagamento Pendente'
                     : 'Digitalizar Fatura'}
                 </Text>
               </View>
@@ -756,7 +812,7 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
             </KeyboardAvoidingView>
           )}
 
-          {/* ================= STEP 4: PAYMENT METHOD SELECTION ================= */}
+          {/* ================= STEP 4: PAYMENT / DUE DATE SELECTION ================= */}
           {step === 'payment_method' && (
             <ScrollView
               style={styles.paymentScroll}
@@ -789,72 +845,196 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                 )}
               </View>
 
-              <View style={styles.paymentHeaderBlock}>
-                <Text style={styles.paymentPromptTitle}>
-                  Qual foi o método de pagamento?
-                </Text>
-                <Text style={styles.paymentPromptDesc}>
-                  Indica a forma de pagamento para registar a despesa:
-                </Text>
-              </View>
-
-              {/* 4 Payment Options */}
-              <View style={styles.paymentMethodsList}>
-                {PAYMENT_METHODS.map((pm) => {
-                  const isSelected = paymentMethod === pm.id;
-                  const IconComponent = pm.icon;
-                  return (
-                    <TouchableOpacity
-                      key={pm.id}
-                      activeOpacity={0.8}
+              {/* Status Toggle Card: Já foi Paga vs Fica Pendente */}
+              <View style={styles.paymentStatusCard}>
+                <Text style={styles.paymentStatusQuestion}>Esta fatura já foi paga?</Text>
+                <View style={styles.paymentStatusToggleRow}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={[
+                      styles.paymentStatusToggleBtn,
+                      isPaid && styles.paymentStatusToggleBtnPaidActive,
+                    ]}
+                    onPress={() => setIsPaid(true)}
+                  >
+                    <CheckIcon size={16} color={isPaid ? '#00D09E' : 'rgba(255, 255, 255, 0.6)'} />
+                    <Text
                       style={[
-                        styles.paymentMethodCard,
-                        isSelected && styles.paymentMethodCardSelected,
+                        styles.paymentStatusToggleText,
+                        isPaid && styles.paymentStatusToggleTextPaidActive,
                       ]}
-                      onPress={() => setPaymentMethod(pm.id)}
                     >
-                      <View
-                        style={[
-                          styles.paymentIconWrap,
-                          isSelected && styles.paymentIconWrapSelected,
-                        ]}
-                      >
-                        <IconComponent
-                          size={22}
-                          color={isSelected ? '#00D09E' : '#FFFFFF'}
-                        />
-                      </View>
+                      Já foi Paga
+                    </Text>
+                  </TouchableOpacity>
 
-                      <View style={styles.paymentTextWrap}>
-                        <Text
-                          style={[
-                            styles.paymentMethodTitle,
-                            isSelected && styles.paymentMethodTitleSelected,
-                          ]}
-                        >
-                          {pm.label}
-                        </Text>
-                        <Text style={styles.paymentMethodDesc}>{pm.desc}</Text>
-                      </View>
-
-                      <View
-                        style={[
-                          styles.radioCircle,
-                          isSelected && styles.radioCircleSelected,
-                        ]}
-                      >
-                        {isSelected && <View style={styles.radioInnerDot} />}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={[
+                      styles.paymentStatusToggleBtn,
+                      !isPaid && styles.paymentStatusToggleBtnPendingActive,
+                    ]}
+                    onPress={() => setIsPaid(false)}
+                  >
+                    <Text
+                      style={[
+                        styles.paymentStatusToggleText,
+                        !isPaid && styles.paymentStatusToggleTextPendingActive,
+                      ]}
+                    >
+                      ⏳ Fica Pendente
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
+
+              {/* OPÇÃO 1: JÁ FOI PAGA -> SELETOR DE MÉTODO DE PAGAMENTO */}
+              {isPaid ? (
+                <>
+                  <View style={styles.paymentHeaderBlock}>
+                    <Text style={styles.paymentPromptTitle}>
+                      Qual foi o método de pagamento?
+                    </Text>
+                    <Text style={styles.paymentPromptDesc}>
+                      Indica a forma de pagamento para registar a despesa:
+                    </Text>
+                  </View>
+
+                  <View style={styles.paymentMethodsList}>
+                    {PAYMENT_METHODS.map((pm) => {
+                      const isSelected = paymentMethod === pm.id;
+                      const IconComponent = pm.icon;
+                      return (
+                        <TouchableOpacity
+                          key={pm.id}
+                          activeOpacity={0.8}
+                          style={[
+                            styles.paymentMethodCard,
+                            isSelected && styles.paymentMethodCardSelected,
+                          ]}
+                          onPress={() => setPaymentMethod(pm.id)}
+                        >
+                          <View
+                            style={[
+                              styles.paymentIconWrap,
+                              isSelected && styles.paymentIconWrapSelected,
+                            ]}
+                          >
+                            <IconComponent
+                              size={22}
+                              color={isSelected ? '#00D09E' : '#FFFFFF'}
+                            />
+                          </View>
+
+                          <View style={styles.paymentTextWrap}>
+                            <Text
+                              style={[
+                                styles.paymentMethodTitle,
+                                isSelected && styles.paymentMethodTitleSelected,
+                              ]}
+                            >
+                              {pm.label}
+                            </Text>
+                            <Text style={styles.paymentMethodDesc}>{pm.desc}</Text>
+                          </View>
+
+                          <View
+                            style={[
+                              styles.radioCircle,
+                              isSelected && styles.radioCircleSelected,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.radioInnerDot} />}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : (
+                /* OPÇÃO 2: FICA PENDENTE -> SELETOR DE DATA LIMITE DE PAGAMENTO */
+                <View style={styles.pendingDueSection}>
+                  <View style={styles.paymentHeaderBlock}>
+                    <Text style={styles.paymentPromptTitle}>
+                      Até que dia tem de ser feito o pagamento?
+                    </Text>
+                    <Text style={styles.paymentPromptDesc}>
+                      Define a data limite. O Vault irá avisar-te automaticamente:
+                    </Text>
+                  </View>
+
+                  <View style={styles.dueDateInputWrap}>
+                    <Text style={styles.fieldLabel}>Data Limite (YYYY-MM-DD)</Text>
+                    <TextInput
+                      style={styles.textInputField}
+                      value={dueDate}
+                      onChangeText={setDueDate}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                    />
+                  </View>
+
+                  {/* Atalhos rápidos de data limite */}
+                  <View style={styles.quickDateChipsRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={styles.quickChip}
+                      onPress={() => setQuickDueDate(7)}
+                    >
+                      <Text style={styles.quickChipText}>+7 dias</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={styles.quickChip}
+                      onPress={() => setQuickDueDate(15)}
+                    >
+                      <Text style={styles.quickChipText}>+15 dias</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={styles.quickChip}
+                      onPress={() => setQuickDueDate(30)}
+                    >
+                      <Text style={styles.quickChipText}>+30 dias</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={styles.quickChip}
+                      onPress={setEndOfMonthDueDate}
+                    >
+                      <Text style={styles.quickChipText}>Fim do Mês</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Banner Explicativo das Notificações Automáticas */}
+                  <View style={styles.notificationNoticeBox}>
+                    <View style={styles.notificationNoticeIconWrap}>
+                      <SparkleIcon size={16} color="#00D09E" />
+                    </View>
+                    <View style={styles.notificationNoticeTextWrap}>
+                      <Text style={styles.notificationNoticeTitle}>
+                        Lembretes Automáticos Diários
+                      </Text>
+                      <Text style={styles.notificationNoticeDesc}>
+                        A app enviará uma notificação diária a partir de 2 dias antes da data limite, mesmo com a app fechada ou o telemóvel bloqueado. Ao tocares no aviso, irás diretamente para esta fatura.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
 
               {/* Confirm & Save Button */}
               <TouchableOpacity
                 activeOpacity={0.8}
-                style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-                onPress={() => handleConfirmAndSave(paymentMethod)}
+                style={[
+                  styles.saveButton,
+                  !isPaid && styles.saveButtonPending,
+                  isSaving && styles.saveButtonDisabled,
+                ]}
+                onPress={() => handleConfirmAndSave(isPaid ? paymentMethod : undefined)}
                 disabled={isSaving}
               >
                 {isSaving ? (
@@ -863,7 +1043,9 @@ export const InvoiceScannerModal: React.FC<InvoiceScannerModalProps> = ({
                   <>
                     <CheckIcon size={18} color="#FFFFFF" />
                     <Text style={styles.saveButtonText}>
-                      Gravar Despesa ({paymentMethod})
+                      {isPaid
+                        ? `Gravar Despesa (${paymentMethod})`
+                        : 'Gravar Fatura Pendente'}
                     </Text>
                   </>
                 )}
@@ -1377,5 +1559,116 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.medium,
     fontSize: 13,
     color: 'rgba(255, 255, 255, 0.7)',
+  },
+  paymentStatusCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    padding: 14,
+    gap: 10,
+  },
+  paymentStatusQuestion: {
+    fontFamily: FontFamily.bold,
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  paymentStatusToggleRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  paymentStatusToggleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  paymentStatusToggleBtnPaidActive: {
+    borderColor: '#00D09E',
+    backgroundColor: 'rgba(0, 208, 158, 0.12)',
+  },
+  paymentStatusToggleBtnPendingActive: {
+    borderColor: '#FFB800',
+    backgroundColor: 'rgba(255, 184, 0, 0.12)',
+  },
+  paymentStatusToggleText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  paymentStatusToggleTextPaidActive: {
+    color: '#00D09E',
+    fontFamily: FontFamily.bold,
+  },
+  paymentStatusToggleTextPendingActive: {
+    color: '#FFB800',
+    fontFamily: FontFamily.bold,
+  },
+  pendingDueSection: {
+    gap: 12,
+  },
+  dueDateInputWrap: {
+    gap: 6,
+  },
+  quickDateChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  quickChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  quickChipText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  notificationNoticeBox: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 208, 158, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 158, 0.25)',
+    marginTop: 4,
+  },
+  notificationNoticeIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 208, 158, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationNoticeTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  notificationNoticeTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 13,
+    color: '#00D09E',
+  },
+  notificationNoticeDesc: {
+    fontFamily: FontFamily.regular,
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: 'rgba(255, 255, 255, 0.75)',
+  },
+  saveButtonPending: {
+    backgroundColor: '#D97706',
+    borderColor: '#F59E0B',
   },
 });

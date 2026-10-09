@@ -30,6 +30,7 @@ import {
 } from './Icons';
 import { transactionsApi } from '../services/api';
 import { formatCurrency } from '../utils/format';
+import { cancelInvoiceReminders } from '../services/notifications';
 
 export interface ExpenseItem {
   id: string;
@@ -39,6 +40,7 @@ export interface ExpenseItem {
   category: string;
   date: string;
   rawDate: Date;
+  dueDate?: string;
   description?: string;
   avatarChar: string;
 }
@@ -47,6 +49,7 @@ interface ExpensesScreenViewProps {
   type?: 'despesa' | 'receita' | 'pendentes';
   title?: string;
   onOpenAddScreen?: () => void;
+  initialSelectedId?: string | null;
 }
 
 // ============================================================================
@@ -774,6 +777,7 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
   type = 'despesa',
   title,
   onOpenAddScreen,
+  initialSelectedId,
 }) => {
   const insets = useSafeAreaInsets();
   const displayTitle =
@@ -814,6 +818,7 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
             category: t.category || 'Geral',
             date: t.date,
             rawDate: d,
+            dueDate: t.dueDate || undefined,
             description: t.description || '',
             avatarChar: t.avatarChar || (t.name[0] || 'V').toUpperCase(),
           };
@@ -888,6 +893,7 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
               category: t.category || 'Geral',
               date: t.date,
               rawDate: d,
+              dueDate: t.dueDate || undefined,
               description: t.description || '',
               avatarChar: t.avatarChar || (t.name[0] || 'V').toUpperCase(),
             };
@@ -903,6 +909,16 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
 
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Abre automaticamente a fatura se fornecido initialSelectedId (ex: ao tocar na notificação)
+  useEffect(() => {
+    if (initialSelectedId && items.length > 0) {
+      const match = items.find((x) => x.id === initialSelectedId);
+      if (match) {
+        setSelectedExpense(match);
+      }
+    }
+  }, [initialSelectedId, items]);
 
   // Faixa contínua de dias centrada no dia de hoje (-45 a +45 dias = 91 dias)
   const allDays = React.useMemo(() => {
@@ -1171,6 +1187,7 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
   const handleFinishConfirmPayment = async () => {
     if (selectedExpense) {
       try {
+        await cancelInvoiceReminders(selectedExpense.id);
         await transactionsApi.confirmPayment(selectedExpense.id, {
           method: confirmPaymentMethod,
           paymentDate: confirmDate.toISOString(),
@@ -1248,6 +1265,16 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
             </Text>
             <Text style={styles.detailRowValue}>{selectedExpense.date}</Text>
           </View>
+
+          {/* Row 4: Data Limite (Vencimento) */}
+          {Boolean(selectedExpense.dueDate) && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailRowLabel}>Data Limite (Vencimento)</Text>
+              <Text style={[styles.detailRowValue, { color: '#E53935', fontFamily: FontFamily.bold }]}>
+                {selectedExpense.dueDate}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Slide to Confirm Button for Pendentes (Imagem 2) */}

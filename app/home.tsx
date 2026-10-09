@@ -38,6 +38,7 @@ import { dashboardApi, authApi, appUpdatesApi, AppVersionInfo, isNewerVersion, A
 import { AppUpdateModal } from '../src/components/AppUpdateModal';
 import { getCurrentUser, UserSession } from '../src/services/session';
 import { formatCurrency } from '../src/utils/format';
+import { initNotifications, setupNotificationListener } from '../src/services/notifications';
 
 const PHYSICAL_SCREEN_HEIGHT = Math.max(
   Dimensions.get('screen').height,
@@ -63,6 +64,21 @@ export default function HomeScreen() {
   const [isAddVisible, setIsAddVisible] = useState(false);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
+  const [pendingSelectedTxId, setPendingSelectedTxId] = useState<string | null>(null);
+
+  // Inicialização do sistema de notificações (AlarmManager / OS level)
+  useEffect(() => {
+    initNotifications();
+
+    const sub = setupNotificationListener((transactionId) => {
+      setActiveTab('pendentes');
+      setPendingSelectedTxId(transactionId);
+    });
+
+    return () => {
+      sub?.remove();
+    };
+  }, []);
 
   // Sistema de Verificação e Atualização Automática de Versão
   const [availableUpdate, setAvailableUpdate] = useState<AppVersionInfo | null>(null);
@@ -70,7 +86,7 @@ export default function HomeScreen() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
 
-  const localVersion = Constants.expoConfig?.version || '1.0.6';
+  const localVersion = Constants.expoConfig?.version || '1.0.7';
 
   const checkForAppUpdates = async (silent = true) => {
     try {
@@ -598,7 +614,12 @@ export default function HomeScreen() {
               },
             ]}
           >
-            <ExpensesScreenView key="pendentes" type="pendentes" onOpenAddScreen={openAddScreen} />
+            <ExpensesScreenView
+              key="pendentes"
+              type="pendentes"
+              initialSelectedId={pendingSelectedTxId}
+              onOpenAddScreen={openAddScreen}
+            />
           </Animated.View>
 
           {/* Bottom Sheet / Navigation Area */}
