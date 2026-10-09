@@ -1,19 +1,36 @@
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
-// ============================================================================
-// CONFIGURAÇÃO DO GESTOR DE NOTIFICAÇÕES (SISTEMA OPERATIVO / LOCKSCREEN)
-// ============================================================================
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    priority: Notifications.AndroidNotificationPriority.MAX,
-  }),
-});
+// Detectar se está a correr no cliente de desenvolvimento Expo Go
+const isExpoGo =
+  Constants.appOwnership === 'expo' ||
+  Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+
+let Notifications: any = null;
+
+// No Android dentro do Expo Go (a partir do SDK 53), expo-notifications lança um erro nativo.
+// Carregamos de forma segura com require() e protegemos com try/catch para garantir que
+// funciona 100% no APK final / Development Build sem fazer crash no Expo Go.
+if (!isExpoGo || Platform.OS !== 'android') {
+  try {
+    Notifications = require('expo-notifications');
+    if (Notifications?.setNotificationHandler) {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+          priority: Notifications?.AndroidNotificationPriority?.MAX ?? 2,
+        }),
+      });
+    }
+  } catch (err: any) {
+    console.warn('⚠️ [expo-notifications indisponível no Expo Go Android]:', err?.message);
+    Notifications = null;
+  }
+}
 
 export const REMINDER_CHANNEL_ID = 'vault-reminders';
 
@@ -23,22 +40,22 @@ export const REMINDER_CHANNEL_ID = 'vault-reminders';
  * e é visível com o ecrã bloqueado e a aplicação totalmente fechada.
  */
 export async function setupNotificationChannel(): Promise<void> {
-  if (Platform.OS === 'android') {
-    try {
-      await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
-        name: 'Lembretes de Pagamento',
-        description: 'Avisos das datas limite de pagamento de faturas e despesas pendentes',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 300, 200, 300],
-        lightColor: '#00D09E',
-        enableLights: true,
-        enableVibrate: true,
-        showBadge: true,
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-      });
-    } catch (err: any) {
-      console.warn('⚠️ [Setup Notification Channel Error]:', err.message);
-    }
+  if (!Notifications || Platform.OS !== 'android') return;
+
+  try {
+    await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
+      name: 'Lembretes de Pagamento',
+      description: 'Avisos das datas limite de pagamento de faturas e despesas pendentes',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 300, 200, 300],
+      lightColor: '#00D09E',
+      enableLights: true,
+      enableVibrate: true,
+      showBadge: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
+  } catch (err: any) {
+    console.warn('⚠️ [Setup Notification Channel Error]:', err?.message);
   }
 }
 
@@ -46,6 +63,8 @@ export async function setupNotificationChannel(): Promise<void> {
  * Pede permissão ao utilizador para enviar notificações.
  */
 export async function requestNotificationPermissions(): Promise<boolean> {
+  if (!Notifications) return false;
+
   try {
     const settings = await Notifications.getPermissionsAsync();
     if (!settings.granted) {
@@ -60,7 +79,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     }
     return true;
   } catch (err: any) {
-    console.warn('⚠️ [Request Notification Permissions Error]:', err.message);
+    console.warn('⚠️ [Request Notification Permissions Error]:', err?.message);
     return false;
   }
 }
@@ -69,6 +88,10 @@ export async function requestNotificationPermissions(): Promise<boolean> {
  * Inicializa os canais e pede permissões.
  */
 export async function initNotifications(): Promise<void> {
+  if (!Notifications) {
+    console.log('ℹ️ [Notifications]: Modo Expo Go detetado. Lembretes serão simulados localmente (alertas reais no SO funcionam na build APK).');
+    return;
+  }
   await setupNotificationChannel();
   await requestNotificationPermissions();
 }
@@ -90,6 +113,13 @@ export interface InvoiceReminderPayload {
  * disparam mesmo com a aplicação totalmente fechada ou o telemóvel bloqueado.
  */
 export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPayload): Promise<void> {
+  if (!invoice.dueDate) return;
+
+  if (!Notifications) {
+    console.log(`🔔 [Lembrete de Pagamento]: Agendado virtualmente para ${invoice.name} (${invoice.amount}€) com data limite ${invoice.dueDate}. (No APK final, acorda o ecrã bloqueado)`);
+    return;
+  }
+
   try {
     const hasPerm = await requestNotificationPermissions();
     if (!hasPerm) {
@@ -97,9 +127,6 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
       return;
     }
 
-    if (!invoice.dueDate) return;
-
-    // Normalizar a data limite: YYYY-MM-DD
     const parts = invoice.dueDate.split('-');
     if (parts.length !== 3) return;
 
@@ -131,12 +158,11 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
         if (isSameDay && now.getHours() < 21) {
           targetTime = now.getTime() + 60 * 1000;
         } else {
-          // Já passou completamente, passar à frente
           continue;
         }
       }
 
-      let title = 'Lembrete de Pagamento';
+      let title = '⚠️ Lembrete de Pagamento';
       let body = '';
 
       if (offset === -2) {
@@ -144,16 +170,15 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
       } else if (offset === -1) {
         body = `Falta 1 dia para a data limite do pagamento de ${invoice.name} (${formattedAmount} €).`;
       } else {
-        title = 'Data Limite de Pagamento Hoje!';
+        title = '🚨 Data Limite de Pagamento Hoje!';
         body = `Hoje é a data limite do pagamento de ${invoice.name} (${formattedAmount} €)!`;
       }
 
       const identifier = `vault_due_${invoice.id}_day_${offset}`;
 
-      // Cancelar qualquer notificação anterior com este ID antes de reagendar
       try {
         await Notifications.cancelScheduledNotificationAsync(identifier);
-      } catch { }
+      } catch {}
 
       await Notifications.scheduleNotificationAsync({
         identifier,
@@ -179,7 +204,7 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
       console.log(`🔔 [Notification Scheduled]: ${identifier} para ${new Date(targetTime).toLocaleString('pt-PT')}`);
     }
   } catch (err: any) {
-    console.warn('⚠️ [Schedule Notification Error]:', err.message);
+    console.warn('⚠️ [Schedule Notification Error]:', err?.message);
   }
 }
 
@@ -188,7 +213,8 @@ export async function scheduleInvoicePaymentReminders(invoice: InvoiceReminderPa
  * (ex: quando o utilizador marca a fatura como paga).
  */
 export async function cancelInvoiceReminders(transactionId: string): Promise<void> {
-  if (!transactionId) return;
+  if (!transactionId || !Notifications) return;
+
   try {
     for (const offset of [-2, -1, 0]) {
       const identifier = `vault_due_${transactionId}_day_${offset}`;
@@ -196,7 +222,7 @@ export async function cancelInvoiceReminders(transactionId: string): Promise<voi
     }
     console.log(`🔕 [Notifications Cancelled]: Lembretes da fatura ${transactionId} removidos.`);
   } catch (err: any) {
-    console.warn('⚠️ [Cancel Notification Error]:', err.message);
+    console.warn('⚠️ [Cancel Notification Error]:', err?.message);
   }
 }
 
@@ -205,22 +231,32 @@ export async function cancelInvoiceReminders(transactionId: string): Promise<voi
  */
 export function setupNotificationListener(
   onSelectInvoice: (transactionId: string) => void
-): Notifications.Subscription {
-  // Verificar se a aplicação foi aberta diretamente a partir de uma notificação (Cold Start)
-  Notifications.getLastNotificationResponseAsync().then((response) => {
-    const rawId = response?.notification?.request?.content?.data?.transactionId;
-    if (rawId && typeof rawId === 'string') {
-      console.log('📱 [Cold Start from Notification]:', rawId);
-      onSelectInvoice(rawId);
-    }
-  });
+): { remove: () => void } {
+  if (!Notifications) {
+    return { remove: () => {} };
+  }
 
-  // Ouvir toques na notificação com a app aberta ou minimizada
-  return Notifications.addNotificationResponseReceivedListener((response) => {
-    const rawId = response.notification.request.content.data?.transactionId;
-    if (rawId && typeof rawId === 'string') {
-      console.log('📱 [Notification Clicked]:', rawId);
-      onSelectInvoice(rawId);
-    }
-  });
+  try {
+    // Verificar se a aplicação foi aberta diretamente a partir de uma notificação (Cold Start)
+    Notifications.getLastNotificationResponseAsync?.()?.then((response: any) => {
+      const rawId = response?.notification?.request?.content?.data?.transactionId;
+      if (rawId && typeof rawId === 'string') {
+        console.log('📱 [Cold Start from Notification]:', rawId);
+        onSelectInvoice(rawId);
+      }
+    });
+
+    // Ouvir toques na notificação com a app aberta ou minimizada
+    const sub = Notifications.addNotificationResponseReceivedListener((response: any) => {
+      const rawId = response?.notification?.request?.content?.data?.transactionId;
+      if (rawId && typeof rawId === 'string') {
+        console.log('📱 [Notification Clicked]:', rawId);
+        onSelectInvoice(rawId);
+      }
+    });
+
+    return sub;
+  } catch {
+    return { remove: () => {} };
+  }
 }
