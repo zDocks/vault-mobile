@@ -230,6 +230,47 @@ export const transactionsApi = {
       return { success: false, error: error.message };
     }
   },
+
+  // Atualiza transação existente
+  updateTransaction: async (
+    id: string,
+    data: {
+      name?: string;
+      amount?: number;
+      type?: 'despesa' | 'receita';
+      category?: string;
+      method?: string;
+      description?: string;
+      isPaid?: boolean;
+      paymentDate?: string;
+      dueDate?: string;
+      isRecurring?: boolean;
+    }
+  ): Promise<{ success: boolean; transaction?: any; error?: string }> => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/api/transactions/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      });
+      return await response.json();
+    } catch (error: any) {
+      console.warn('⚠️ [API Update Transaction Fallback]:', error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Elimina transação existente
+  deleteTransaction: async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/api/transactions/${id}`, {
+        method: 'DELETE',
+      });
+      return await response.json();
+    } catch (error: any) {
+      console.warn('⚠️ [API Delete Transaction Fallback]:', error.message);
+      return { success: false, error: error.message };
+    }
+  },
 };
 
 // ============================================================================

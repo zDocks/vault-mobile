@@ -3,7 +3,7 @@
     "name": "Vault",
     "slug": "vault-mobile",
     "scheme": "vault",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -17,7 +17,7 @@
     },
     "android": {
       "package": "com.zdocks.vault",
-      "versionCode": 8,
+      "versionCode": 9,
       "splash": {
         "image": "./assets/splash-icon.png",
         "resizeMode": "contain",

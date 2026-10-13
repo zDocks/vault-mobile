@@ -15,6 +15,7 @@ import {
   Easing,
   Dimensions,
   PanResponder,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +28,9 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CheckIcon,
+  CloseIcon,
+  TrashIcon,
+  EditIcon,
 } from './Icons';
 import { transactionsApi } from '../services/api';
 import { formatCurrency } from '../utils/format';
@@ -37,6 +41,9 @@ export interface ExpenseItem {
   name: string;
   method: string;
   amount: string;
+  rawAmount?: number;
+  type?: 'despesa' | 'receita';
+  isPaid?: boolean;
   category: string;
   date: string;
   rawDate: Date;
@@ -815,6 +822,9 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
             amount: type === 'pendentes'
               ? formatCurrency(t.amount, { removeSign: true })
               : formatCurrency(t.amount, { keepSign: true }),
+            rawAmount: t.rawAmount || Math.abs(parseFloat(String(t.amount).replace(/[^0-9.-]+/g, '')) || 0),
+            type: t.type,
+            isPaid: t.isPaid,
             category: t.category || 'Geral',
             date: t.date,
             rawDate: d,
@@ -855,6 +865,139 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
   const [selectedFilter, setSelectedFilter] = useState<number | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<ExpenseItem | null>(null);
 
+  // Estados e Handlers para Edição e Eliminação de Transações
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editMethod, setEditMethod] = useState('Multibanco');
+  const [editDescription, setEditDescription] = useState('');
+  const [editDate, setEditDate] = useState<Date>(new Date());
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const QUICK_CATEGORIES = [
+    'Alimentação',
+    'Compras',
+    'Vencimentos',
+    'Transportes',
+    'Serviços',
+    'Caixa',
+    'Vendas',
+    'Diversos',
+  ];
+
+  const PAYMENT_METHODS = ['Multibanco', 'Dinheiro', 'MBWay', 'Transferência'];
+
+  const formatDateDisplay = (d: Date) => {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const handleOpenEditModal = () => {
+    if (!selectedExpense) return;
+    setEditName(selectedExpense.name);
+    const cleanNum =
+      selectedExpense.rawAmount !== undefined
+        ? selectedExpense.rawAmount
+        : Math.abs(parseFloat(String(selectedExpense.amount).replace(/[^0-9.-]+/g, '')) || 0);
+    setEditAmount(String(cleanNum));
+    setEditCategory(selectedExpense.category);
+    setEditMethod(
+      selectedExpense.method &&
+        selectedExpense.method !== 'Concluído' &&
+        selectedExpense.method !== 'Pendente'
+        ? selectedExpense.method
+        : 'Multibanco'
+    );
+    setEditDescription(selectedExpense.description || '');
+    setEditDate(selectedExpense.rawDate || new Date());
+    setEditError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedExpense) return;
+    if (!editName.trim()) {
+      setEditError('Por favor insere o nome da entidade/fornecedor.');
+      return;
+    }
+    const parsedAmount = parseFloat(editAmount.replace(',', '.'));
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setEditError('Por favor insere um valor numérico válido maior que 0.');
+      return;
+    }
+
+    try {
+      setIsSavingEdit(true);
+      setEditError(null);
+
+      const res = await transactionsApi.updateTransaction(selectedExpense.id, {
+        name: editName.trim(),
+        amount: parsedAmount,
+        category: editCategory.trim() || 'Diversos',
+        method: editMethod,
+        description: editDescription.trim(),
+        paymentDate: editDate.toISOString(),
+      });
+
+      if (res && res.success) {
+        const newDateStr = formatDateDisplay(editDate);
+        const isExpense = selectedExpense.type === 'despesa' || type === 'despesa';
+        const newFormattedAmount = isExpense
+          ? `-${formatCurrency(parsedAmount, { removeSign: true })}`
+          : `+${formatCurrency(parsedAmount, { removeSign: true })}`;
+
+        setSelectedExpense({
+          ...selectedExpense,
+          name: editName.trim(),
+          amount: newFormattedAmount,
+          rawAmount: parsedAmount,
+          category: editCategory.trim() || 'Diversos',
+          method: editMethod,
+          description: editDescription.trim(),
+          date: newDateStr,
+          rawDate: editDate,
+          avatarChar: editName.trim().charAt(0).toUpperCase(),
+        });
+
+        setIsEditModalOpen(false);
+        loadTransactionsFromApi(0, false);
+      } else {
+        setEditError(res?.error || 'Erro ao guardar alterações.');
+      }
+    } catch (err: any) {
+      setEditError(err.message || 'Erro ao comunicar com o servidor.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedExpense) return;
+    try {
+      setIsDeleting(true);
+      const res = await transactionsApi.deleteTransaction(selectedExpense.id);
+      if (res && res.success) {
+        cancelInvoiceReminders(selectedExpense.id);
+        setIsDeleteModalOpen(false);
+        setSelectedExpense(null);
+        loadTransactionsFromApi(0, false);
+      } else {
+        alert(res?.error || 'Erro ao eliminar transação.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Erro ao comunicar com o servidor.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Infinite scroll trigger
   const handleEndReached = () => {
     if (!isLoading && !isLoadingMore && hasMore && !searchQuery.trim() && !appliedDate) {
@@ -890,6 +1033,9 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
               amount: type === 'pendentes'
                 ? formatCurrency(t.amount, { removeSign: true })
                 : formatCurrency(t.amount, { keepSign: true }),
+              rawAmount: t.rawAmount || Math.abs(parseFloat(String(t.amount).replace(/[^0-9.-]+/g, '')) || 0),
+              type: t.type,
+              isPaid: t.isPaid,
               category: t.category || 'Geral',
               date: t.date,
               rawDate: d,
@@ -1217,14 +1363,34 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
             { paddingTop: Math.max(insets.top + 8, 36) },
           ]}
         >
-          {/* Back Button */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            style={styles.detailBackButton}
-            onPress={() => setSelectedExpense(null)}
-          >
-            <BackArrowIcon size={26} color="#111111" />
-          </TouchableOpacity>
+          {/* Top Bar with Back and Action Buttons */}
+          <View style={styles.detailNavRow}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              style={styles.detailBackButton}
+              onPress={() => setSelectedExpense(null)}
+            >
+              <BackArrowIcon size={26} color="#111111" />
+            </TouchableOpacity>
+
+            <View style={styles.detailNavActions}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={styles.detailNavBtn}
+                onPress={handleOpenEditModal}
+              >
+                <EditIcon size={20} color="#111111" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.detailNavBtn, styles.detailNavDeleteBtn]}
+                onPress={() => setIsDeleteModalOpen(true)}
+              >
+                <TrashIcon size={20} color="#E53935" />
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {/* Large Amount */}
           <Text style={styles.detailAmountText} numberOfLines={1} adjustsFontSizeToFit>
@@ -1276,6 +1442,262 @@ export const ExpensesScreenView: React.FC<ExpensesScreenViewProps> = ({
             </View>
           )}
         </View>
+
+        {/* Bottom Action Buttons for Despesas / Receitas */}
+        {type !== 'pendentes' && (
+          <View
+            style={[
+              styles.detailBottomActionsRow,
+              { paddingBottom: Math.max(insets.bottom + 20, 28) },
+            ]}
+          >
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.detailBottomEditBtn}
+              onPress={handleOpenEditModal}
+            >
+              <EditIcon size={18} color="#005445" />
+              <Text style={styles.detailBottomEditText}>Editar Registo</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.detailBottomDeleteBtn}
+              onPress={() => setIsDeleteModalOpen(true)}
+            >
+              <TrashIcon size={18} color="#E53935" />
+              <Text style={styles.detailBottomDeleteText}>Eliminar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        <Modal
+          visible={isDeleteModalOpen}
+          transparent
+          statusBarTranslucent
+          animationType="fade"
+          onRequestClose={() => setIsDeleteModalOpen(false)}
+        >
+          <View style={styles.centerModalOverlay}>
+            <View style={styles.deleteModalCard}>
+              <View style={styles.deleteModalIconBox}>
+                <TrashIcon size={26} color="#E53935" />
+              </View>
+
+              <Text style={styles.deleteModalTitle}>Eliminar Registo</Text>
+              <Text style={styles.deleteModalBody}>
+                Tens a certeza de que pretendes eliminar o registo "{selectedExpense.name}" (
+                {formatCurrency(selectedExpense.amount, { removeSign: true })}) permanentemente?
+                Esta ação é irreversível.
+              </Text>
+
+              <View style={styles.deleteModalButtonsRow}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.deleteCancelBtn}
+                  onPress={() => setIsDeleteModalOpen(false)}
+                  disabled={isDeleting}
+                >
+                  <Text style={styles.deleteCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.deleteConfirmBtn}
+                  onPress={handleConfirmDelete}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.deleteConfirmText}>Eliminar</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Edit Transaction Modal */}
+        <Modal
+          visible={isEditModalOpen}
+          transparent
+          statusBarTranslucent
+          animationType="slide"
+          onRequestClose={() => setIsEditModalOpen(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalOverlay}
+          >
+            <TouchableWithoutFeedback onPress={() => setIsEditModalOpen(false)}>
+              <View style={styles.modalBackdrop} />
+            </TouchableWithoutFeedback>
+
+            <View style={[styles.editModalSheet, { paddingBottom: Math.max(insets.bottom + 16, 24) }]}>
+              <View style={styles.editModalHeader}>
+                <Text style={styles.editModalTitle}>Editar Registo</Text>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.editModalCloseBtn}
+                  onPress={() => setIsEditModalOpen(false)}
+                >
+                  <CloseIcon size={20} color="#111111" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                style={{ maxHeight: 460 }}
+              >
+                {editError && (
+                  <View style={styles.editErrorBanner}>
+                    <Text style={styles.editErrorText}>{editError}</Text>
+                  </View>
+                )}
+
+                {/* Nome */}
+                <Text style={styles.editFieldLabel}>Nome / Entidade</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  placeholder="Ex: Recheio, Vodafone, Salário"
+                  placeholderTextColor="#9E9EA4"
+                />
+
+                {/* Valor */}
+                <Text style={styles.editFieldLabel}>Valor (€)</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editAmount}
+                  onChangeText={setEditAmount}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor="#9E9EA4"
+                />
+
+                {/* Categoria */}
+                <Text style={styles.editFieldLabel}>Categoria</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editCategory}
+                  onChangeText={setEditCategory}
+                  placeholder="Ex: Compras, Alimentação"
+                  placeholderTextColor="#9E9EA4"
+                />
+                <View style={styles.editChipsRow}>
+                  {QUICK_CATEGORIES.map((cat) => {
+                    const isSelected = editCategory.toLowerCase() === cat.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={cat}
+                        activeOpacity={0.7}
+                        style={[styles.editChip, isSelected && styles.editChipActive]}
+                        onPress={() => setEditCategory(cat)}
+                      >
+                        <Text style={[styles.editChipText, isSelected && styles.editChipTextActive]}>
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Método de Pagamento */}
+                {type !== 'pendentes' && (
+                  <>
+                    <Text style={styles.editFieldLabel}>Método de Pagamento</Text>
+                    <View style={styles.editChipsRow}>
+                      {PAYMENT_METHODS.map((m) => {
+                        const isSelected = editMethod === m;
+                        return (
+                          <TouchableOpacity
+                            key={m}
+                            activeOpacity={0.7}
+                            style={[styles.editChip, isSelected && styles.editChipActive]}
+                            onPress={() => setEditMethod(m)}
+                          >
+                            <Text style={[styles.editChipText, isSelected && styles.editChipTextActive]}>
+                              {m}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
+
+                {/* Data */}
+                <Text style={styles.editFieldLabel}>Data do Registo</Text>
+                <View style={styles.editDateRow}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    style={styles.editDateQuickBtn}
+                    onPress={() => {
+                      const d = new Date(editDate);
+                      d.setDate(d.getDate() - 1);
+                      setEditDate(d);
+                    }}
+                  >
+                    <Text style={styles.editDateQuickText}>-1 dia</Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.editDateDisplayBox}>
+                    <CalendarIcon size={16} color="#005445" />
+                    <Text style={styles.editDateDisplayText}>{formatDateDisplay(editDate)}</Text>
+                  </View>
+
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    style={styles.editDateQuickBtn}
+                    onPress={() => setEditDate(new Date())}
+                  >
+                    <Text style={styles.editDateQuickText}>Hoje</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    style={styles.editDateQuickBtn}
+                    onPress={() => {
+                      const d = new Date(editDate);
+                      d.setDate(d.getDate() + 1);
+                      setEditDate(d);
+                    }}
+                  >
+                    <Text style={styles.editDateQuickText}>+1 dia</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Descrição */}
+                <Text style={styles.editFieldLabel}>Descrição (Opcional)</Text>
+                <TextInput
+                  style={[styles.editInput, { height: 70, textAlignVertical: 'top', paddingTop: 12 }]}
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  placeholder="Notas adicionais sobre este registo"
+                  placeholderTextColor="#9E9EA4"
+                  multiline
+                />
+              </ScrollView>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                style={styles.editSaveBtn}
+                onPress={handleSaveEdit}
+                disabled={isSavingEdit}
+              >
+                {isSavingEdit ? (
+                  <ActivityIndicator size="small" color="#00D09E" />
+                ) : (
+                  <Text style={styles.editSaveBtnText}>Guardar Alterações</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {/* Slide to Confirm Button for Pendentes (Imagem 2) */}
         {type === 'pendentes' && (
@@ -1893,21 +2315,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     position: 'relative',
   },
+  detailNavRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   detailBackButton: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
     width: 44,
     height: 44,
     justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  detailNavActions: {
+    flexDirection: 'row',
     alignItems: 'center',
-    zIndex: 10,
+    gap: 10,
+  },
+  detailNavBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EBEBEF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  detailNavDeleteBtn: {
+    backgroundColor: '#FDE8E8',
   },
   detailAmountText: {
     fontFamily: FontFamily.bold,
     fontSize: 38,
     color: '#111111',
-    marginTop: 50,
+    marginTop: 10,
     letterSpacing: -0.5,
     textAlign: 'center',
     paddingHorizontal: 20,
@@ -2215,5 +2656,258 @@ const styles = StyleSheet.create({
   drumLightTextSide: {
     fontSize: 21,
     color: '#D1D1D6',
+  },
+
+  // Detail Bottom Actions Row
+  detailBottomActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 22,
+    marginTop: 32,
+    width: '100%',
+  },
+  detailBottomEditBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#E8F5F1',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 84, 69, 0.2)',
+  },
+  detailBottomEditText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 15,
+    color: '#005445',
+  },
+  detailBottomDeleteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#FDE8E8',
+  },
+  detailBottomDeleteText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 15,
+    color: '#E53935',
+  },
+
+  // Delete Modal Styles
+  centerModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  deleteModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  deleteModalIconBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FDE8E8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  deleteModalTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 20,
+    color: '#111111',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  deleteModalBody: {
+    fontFamily: FontFamily.regular,
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  deleteModalButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  deleteCancelBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F0F0F2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteCancelText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 15,
+    color: '#333333',
+  },
+  deleteConfirmBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E53935',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteConfirmText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+
+  // Edit Modal Styles
+  editModalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '90%',
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  editModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  editModalTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: 22,
+    color: '#111111',
+  },
+  editModalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F0F0F2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  editErrorBanner: {
+    backgroundColor: '#FDE8E8',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 14,
+  },
+  editErrorText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 13,
+    color: '#E53935',
+  },
+  editFieldLabel: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 12,
+    color: '#666666',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  editInput: {
+    backgroundColor: '#F5F5F7',
+    borderRadius: 14,
+    height: 48,
+    paddingHorizontal: 16,
+    fontSize: 15,
+    fontFamily: FontFamily.medium,
+    color: '#111111',
+    marginBottom: 14,
+  },
+  editChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  editChip: {
+    backgroundColor: '#F0F0F2',
+    paddingVertical: 7,
+    paddingHorizontal: 13,
+    borderRadius: 16,
+  },
+  editChipActive: {
+    backgroundColor: '#005445',
+  },
+  editChipText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 13,
+    color: '#333333',
+  },
+  editChipTextActive: {
+    fontFamily: FontFamily.bold,
+    color: '#00D09E',
+  },
+  editDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  editDateDisplayBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#E8F5F1',
+    height: 42,
+    borderRadius: 12,
+  },
+  editDateDisplayText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 14,
+    color: '#005445',
+  },
+  editDateQuickBtn: {
+    backgroundColor: '#F0F0F2',
+    paddingHorizontal: 10,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  editDateQuickText: {
+    fontFamily: FontFamily.medium,
+    fontSize: 12,
+    color: '#333333',
+  },
+  editSaveBtn: {
+    backgroundColor: '#00382F',
+    height: 54,
+    borderRadius: 27,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  editSaveBtnText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 16,
+    color: '#00D09E',
   },
 });

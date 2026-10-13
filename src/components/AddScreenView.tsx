@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CloseIcon,
+  CalendarIcon,
 } from './Icons';
 import { transactionsApi, categoriesApi, entitiesApi } from '../services/api';
 import { scheduleInvoicePaymentReminders } from '../services/notifications';
@@ -199,8 +200,21 @@ const DrumWheelPicker: React.FC<DrumWheelPickerProps> = ({
 // ============================================================================
 // Main AddScreenView Component
 // ============================================================================
-const DAY_ITEM_WIDTH = 52;
-const WEEK_DAYS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'];
+const CALENDAR_WEEK_DAYS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'];
+const MONTH_NAMES = [
+  'Janeiro',
+  'Fevereiro',
+  'Março',
+  'Abril',
+  'Maio',
+  'Junho',
+  'Julho',
+  'Agosto',
+  'Setembro',
+  'Outubro',
+  'Novembro',
+  'Dezembro',
+];
 
 type WizardStepType =
   | 'category'
@@ -288,45 +302,14 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
   }, []);
 
   // Data state - padrão: hoje
-  const todayDate = new Date();
-  todayDate.setHours(0, 0, 0, 0);
+  const todayDate = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
   const [selectedDate, setSelectedDate] = useState<Date>(todayDate);
-  const [currentMonthIndex, setCurrentMonthIndex] = useState(todayDate.getMonth());
-
-  const dateScrollRef = useRef<ScrollView>(null);
-
-  // Faixa contínua de dias (-60 a +180 dias)
-  const [allDays] = useState(() => {
-    const days: { date: Date; dayNum: number; dayName: string; key: string }[] = [];
-    const base = new Date();
-    base.setHours(0, 0, 0, 0);
-    for (let offset = -60; offset <= 180; offset++) {
-      const d = new Date(base);
-      d.setDate(base.getDate() + offset);
-      days.push({
-        date: d,
-        dayNum: d.getDate(),
-        dayName: WEEK_DAYS[d.getDay()],
-        key: `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`,
-      });
-    }
-    return days;
-  });
-
-  const MONTH_NAMES = [
-    'Janeiro',
-    'Fevereiro',
-    'Março',
-    'Abril',
-    'Maio',
-    'Junho',
-    'Julho',
-    'Agosto',
-    'Setembro',
-    'Outubro',
-    'Novembro',
-    'Dezembro',
-  ];
+  const [calendarYear, setCalendarYear] = useState<number>(todayDate.getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState<number>(todayDate.getMonth());
 
   // Step Descrição
   const [description, setDescription] = useState('');
@@ -410,47 +393,38 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
   const currentScreen: WizardStepType = currentFlow[wizardStepIndex] || 'category';
   const isLastStep = wizardStepIndex === currentFlow.length - 1;
 
-  // Auto-scroll to selectedDate when entering date step
+  // Sincronizar mês/ano do calendário com a data selecionada ao entrar no ecrã de data
   useEffect(() => {
     if (currentScreen === 'date') {
-      const targetIdx = allDays.findIndex(
-        (d) =>
-          d.date.getFullYear() === selectedDate.getFullYear() &&
-          d.date.getMonth() === selectedDate.getMonth() &&
-          d.date.getDate() === selectedDate.getDate()
-      );
-      if (targetIdx !== -1) {
-        setTimeout(() => {
-          dateScrollRef.current?.scrollTo({
-            x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
-            animated: false,
-          });
-        }, 100);
-      }
+      setCalendarMonth(selectedDate.getMonth());
+      setCalendarYear(selectedDate.getFullYear());
     }
   }, [currentScreen]);
 
-  // When scrolling horizontally, update visible month title based on centered item
-  const handleDateScroll = (e: any) => {
-    const scrollX = e.nativeEvent.contentOffset.x;
-    const centerIdx = Math.round((scrollX + 140) / DAY_ITEM_WIDTH);
-    const clampedIdx = Math.max(0, Math.min(centerIdx, allDays.length - 1));
-    const month = allDays[clampedIdx].date.getMonth();
-    if (month !== currentMonthIndex) {
-      setCurrentMonthIndex(month);
+  // Navegação entre meses no calendário
+  const handleMonthNav = (direction: 'next' | 'prev') => {
+    if (direction === 'next') {
+      if (calendarMonth === 11) {
+        setCalendarMonth(0);
+        setCalendarYear((y) => y + 1);
+      } else {
+        setCalendarMonth((m) => m + 1);
+      }
+    } else {
+      if (calendarMonth === 0) {
+        setCalendarMonth(11);
+        setCalendarYear((y) => y - 1);
+      } else {
+        setCalendarMonth((m) => m - 1);
+      }
     }
   };
 
-  // Month navigation arrows smoothly scroll to first day of requested month
-  const handleMonthNav = (direction: 'next' | 'prev') => {
-    const newMonth = (currentMonthIndex + (direction === 'next' ? 1 : -1) + 12) % 12;
-    setCurrentMonthIndex(newMonth);
-    const targetIdx = allDays.findIndex((d) => d.date.getMonth() === newMonth);
-    if (targetIdx !== -1) {
-      dateScrollRef.current?.scrollTo({
-        x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
-        animated: true,
-      });
+  const handleSelectDay = (day: Date, isCurrentMonth: boolean) => {
+    setSelectedDate(day);
+    if (!isCurrentMonth) {
+      setCalendarMonth(day.getMonth());
+      setCalendarYear(day.getFullYear());
     }
   };
 
@@ -459,20 +433,8 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
     base.setDate(base.getDate() + daysToAdd);
     base.setHours(0, 0, 0, 0);
     setSelectedDate(base);
-    setCurrentMonthIndex(base.getMonth());
-
-    const targetIdx = allDays.findIndex(
-      (d) =>
-        d.date.getFullYear() === base.getFullYear() &&
-        d.date.getMonth() === base.getMonth() &&
-        d.date.getDate() === base.getDate()
-    );
-    if (targetIdx !== -1) {
-      dateScrollRef.current?.scrollTo({
-        x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
-        animated: true,
-      });
-    }
+    setCalendarMonth(base.getMonth());
+    setCalendarYear(base.getFullYear());
   };
 
   const handleEndOfMonthDueDate = () => {
@@ -480,20 +442,94 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     lastDay.setHours(0, 0, 0, 0);
     setSelectedDate(lastDay);
-    setCurrentMonthIndex(lastDay.getMonth());
+    setCalendarMonth(lastDay.getMonth());
+    setCalendarYear(lastDay.getFullYear());
+  };
 
-    const targetIdx = allDays.findIndex(
-      (d) =>
-        d.date.getFullYear() === lastDay.getFullYear() &&
-        d.date.getMonth() === lastDay.getMonth() &&
-        d.date.getDate() === lastDay.getDate()
-    );
-    if (targetIdx !== -1) {
-      dateScrollRef.current?.scrollTo({
-        x: Math.max(0, targetIdx * DAY_ITEM_WIDTH - 140),
-        animated: true,
+  // Cálculo das semanas do mês para a grelha de calendário
+  const calendarWeeks = useMemo(() => {
+    interface CalendarDayItem {
+      date: Date;
+      dayNum: number;
+      isCurrentMonth: boolean;
+      isToday: boolean;
+      isSelected: boolean;
+      key: string;
+    }
+
+    const days: CalendarDayItem[] = [];
+    const firstDay = new Date(calendarYear, calendarMonth, 1);
+    // Segunda-feira é índice 0 (padrão europeu/português)
+    const startDayOfWeek = (firstDay.getDay() + 6) % 7;
+    const totalDaysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+    const totalDaysInPrevMonth = new Date(calendarYear, calendarMonth, 0).getDate();
+
+    // 1. Dias do mês anterior para preencher a primeira semana
+    for (let i = startDayOfWeek - 1; i >= 0; i--) {
+      const dNum = totalDaysInPrevMonth - i;
+      const d = new Date(calendarYear, calendarMonth - 1, dNum);
+      d.setHours(0, 0, 0, 0);
+      days.push({
+        date: d,
+        dayNum: dNum,
+        isCurrentMonth: false,
+        isToday: d.getTime() === todayDate.getTime(),
+        isSelected:
+          d.getFullYear() === selectedDate.getFullYear() &&
+          d.getMonth() === selectedDate.getMonth() &&
+          d.getDate() === selectedDate.getDate(),
+        key: `prev-${calendarYear}-${calendarMonth}-${dNum}`,
       });
     }
+
+    // 2. Dias do mês corrente
+    for (let dNum = 1; dNum <= totalDaysInMonth; dNum++) {
+      const d = new Date(calendarYear, calendarMonth, dNum);
+      d.setHours(0, 0, 0, 0);
+      days.push({
+        date: d,
+        dayNum: dNum,
+        isCurrentMonth: true,
+        isToday: d.getTime() === todayDate.getTime(),
+        isSelected:
+          d.getFullYear() === selectedDate.getFullYear() &&
+          d.getMonth() === selectedDate.getMonth() &&
+          d.getDate() === selectedDate.getDate(),
+        key: `curr-${calendarYear}-${calendarMonth}-${dNum}`,
+      });
+    }
+
+    // 3. Dias do mês seguinte para completar as linhas da grelha
+    const remainingDays = (7 - (days.length % 7)) % 7;
+    for (let dNum = 1; dNum <= remainingDays; dNum++) {
+      const d = new Date(calendarYear, calendarMonth + 1, dNum);
+      d.setHours(0, 0, 0, 0);
+      days.push({
+        date: d,
+        dayNum: dNum,
+        isCurrentMonth: false,
+        isToday: d.getTime() === todayDate.getTime(),
+        isSelected:
+          d.getFullYear() === selectedDate.getFullYear() &&
+          d.getMonth() === selectedDate.getMonth() &&
+          d.getDate() === selectedDate.getDate(),
+        key: `next-${calendarYear}-${calendarMonth}-${dNum}`,
+      });
+    }
+
+    const weeks: CalendarDayItem[][] = [];
+    for (let i = 0; i < days.length; i += 7) {
+      weeks.push(days.slice(i, i + 7));
+    }
+    return weeks;
+  }, [calendarYear, calendarMonth, selectedDate, todayDate]);
+
+  const formatSelectedDateBanner = (d: Date) => {
+    const day = d.getDate();
+    const month = MONTH_NAMES[d.getMonth()];
+    const year = d.getFullYear();
+    const dayOfWeek = CALENDAR_WEEK_DAYS[(d.getDay() + 6) % 7];
+    return `${dayOfWeek}, ${day} de ${month} de ${year}`;
   };
 
   // Generic Bottom Sheet Modal for adding new items (Category, Employee, Sub-type, Supplier)
@@ -625,7 +661,8 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
     const freshToday = new Date();
     freshToday.setHours(0, 0, 0, 0);
     setSelectedDate(freshToday);
-    setCurrentMonthIndex(freshToday.getMonth());
+    setCalendarMonth(freshToday.getMonth());
+    setCalendarYear(freshToday.getFullYear());
     onClose();
   };
 
@@ -1251,7 +1288,11 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
 
               {/* SCREEN: DATA */}
               {currentScreen === 'date' && (
-                <View style={styles.stepContentCentered}>
+                <ScrollView
+                  style={styles.dateStepScroll}
+                  contentContainerStyle={styles.dateStepScrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
                   <Text style={styles.screenTitleCentered}>
                     {isPaid ? 'Data' : 'Data Limite'}
                   </Text>
@@ -1261,92 +1302,84 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                     </Text>
                   )}
 
-                  {/* Month Navigation */}
-                  <View style={styles.monthNavRow}>
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      style={styles.monthNavButton}
-                      onPress={() => handleMonthNav('prev')}
-                    >
-                      <ChevronLeftIcon size={22} color="#FFFFFF" />
-                    </TouchableOpacity>
-
-                    <Text style={styles.monthTitleText}>
-                      {MONTH_NAMES[currentMonthIndex]}
+                  {/* Selected Date Badge */}
+                  <View style={styles.selectedDateBadge}>
+                    <CalendarIcon size={14} color="#00D09E" />
+                    <Text style={styles.selectedDateBadgeText}>
+                      {formatSelectedDateBanner(selectedDate)}
                     </Text>
-
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      style={styles.monthNavButton}
-                      onPress={() => handleMonthNav('next')}
-                    >
-                      <ChevronRightIcon size={22} color="#FFFFFF" />
-                    </TouchableOpacity>
                   </View>
 
-                  {/* Continuous Horizontal ScrollView of days */}
-                  <View style={styles.daysScrollViewWrapper}>
-                    <ScrollView
-                      ref={dateScrollRef}
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      onScroll={handleDateScroll}
-                      scrollEventThrottle={32}
-                      contentContainerStyle={styles.daysScrollContent}
-                    >
-                      {allDays.map((item) => {
-                        const dCopy = new Date(
-                          item.date.getFullYear(),
-                          item.date.getMonth(),
-                          item.date.getDate()
-                        );
-                        const selCopy = new Date(
-                          selectedDate.getFullYear(),
-                          selectedDate.getMonth(),
-                          selectedDate.getDate()
-                        );
-                        const diff = Math.round(
-                          (dCopy.getTime() - selCopy.getTime()) / (1000 * 60 * 60 * 24)
-                        );
-                        const isSelected = diff === 0;
-                        const isFullyOpaque = isSelected || diff === -1 || diff === -2;
+                  {/* Calendar Card Container */}
+                  <View style={styles.calendarCard}>
+                    {/* Month / Year Navigation */}
+                    <View style={styles.calendarNavRow}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        style={styles.calendarNavBtn}
+                        onPress={() => handleMonthNav('prev')}
+                      >
+                        <ChevronLeftIcon size={20} color="#FFFFFF" />
+                      </TouchableOpacity>
 
-                        return (
-                          <TouchableOpacity
-                            key={item.key}
-                            activeOpacity={0.75}
-                            style={[
-                              styles.dayColumn,
-                              isSelected && styles.dayColumnActive,
-                              !isFullyOpaque && styles.dayColumnDimmed,
-                            ]}
-                            onPress={() => {
-                              setSelectedDate(item.date);
-                              setCurrentMonthIndex(item.date.getMonth());
-                            }}
-                          >
-                            <Text
-                              style={[
-                                styles.dayNameText,
-                                isSelected && styles.dayNameTextActive,
-                                !isFullyOpaque && styles.dayTextDimmed,
-                              ]}
+                      <View style={styles.calendarMonthTitleContainer}>
+                        <Text style={styles.calendarMonthTitle}>
+                          {MONTH_NAMES[calendarMonth]} {calendarYear}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        style={styles.calendarNavBtn}
+                        onPress={() => handleMonthNav('next')}
+                      >
+                        <ChevronRightIcon size={20} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Weekday Headers */}
+                    <View style={styles.weekdayHeaderRow}>
+                      {CALENDAR_WEEK_DAYS.map((dayLabel) => (
+                        <Text key={dayLabel} style={styles.weekdayLabel}>
+                          {dayLabel}
+                        </Text>
+                      ))}
+                    </View>
+
+                    {/* Weeks & Days Grid */}
+                    <View style={styles.calendarGrid}>
+                      {calendarWeeks.map((week, weekIdx) => (
+                        <View key={`week-${weekIdx}`} style={styles.calendarWeekRow}>
+                          {week.map((item) => (
+                            <TouchableOpacity
+                              key={item.key}
+                              activeOpacity={0.7}
+                              style={styles.calendarDayCell}
+                              onPress={() => handleSelectDay(item.date, item.isCurrentMonth)}
                             >
-                              {item.dayName}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.dayNumText,
-                                isSelected && styles.dayNumTextActive,
-                                !isFullyOpaque && styles.dayTextDimmed,
-                              ]}
-                            >
-                              {item.dayNum}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
+                              <View
+                                style={[
+                                  styles.calendarDayPill,
+                                  item.isSelected && styles.calendarDayPillSelected,
+                                  !item.isSelected && item.isToday && styles.calendarDayPillToday,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.calendarDayNum,
+                                    !item.isCurrentMonth && styles.calendarDayNumOutside,
+                                    item.isToday && !item.isSelected && styles.calendarDayNumToday,
+                                    item.isSelected && styles.calendarDayNumSelected,
+                                  ]}
+                                >
+                                  {item.dayNum}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      ))}
+                    </View>
                   </View>
 
                   {!isPaid && (
@@ -1384,7 +1417,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                       </TouchableOpacity>
                     </View>
                   )}
-                </View>
+                </ScrollView>
               )}
 
               {/* SCREEN: DESCRIÇÃO */}
@@ -1443,7 +1476,8 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                         const future = new Date();
                         future.setDate(future.getDate() + 15);
                         setSelectedDate(future);
-                        setCurrentMonthIndex(future.getMonth());
+                        setCalendarMonth(future.getMonth());
+                        setCalendarYear(future.getFullYear());
                       }}
                     >
                       <Text
@@ -1907,74 +1941,137 @@ const styles = StyleSheet.create({
     color: '#E0F4F0',
   },
 
-  // Step 5: Data Picker Styles with Horizontal ScrollView
-  monthNavRow: {
+  // Step 5: Calendar Date Picker Styles
+  dateStepScroll: {
+    width: '100%',
+    flex: 1,
+  },
+  dateStepScrollContent: {
+    alignItems: 'center',
+    paddingTop: 36,
+    paddingBottom: 90,
+  },
+  selectedDateBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 50,
-    marginTop: 58,
-    marginBottom: 18,
+    gap: 8,
+    backgroundColor: 'rgba(0, 208, 158, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 158, 0.25)',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    marginBottom: 16,
   },
-  monthNavButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0, 60, 50, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  monthTitleText: {
+  selectedDateBadgeText: {
     fontFamily: FontFamily.semiBold,
-    fontSize: 27,
+    fontSize: 13,
+    color: '#00D09E',
+    letterSpacing: 0.2,
+  },
+  calendarCard: {
+    width: '94%',
+    maxWidth: 380,
+    backgroundColor: 'rgba(0, 48, 40, 0.65)',
+    borderRadius: 24,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 158, 0.15)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  calendarNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 6,
+    marginBottom: 16,
+  },
+  calendarNavBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  calendarMonthTitleContainer: {
+    alignItems: 'center',
+  },
+  calendarMonthTitle: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 19,
     color: '#FFFFFF',
-    minWidth: 160,
+    letterSpacing: 0.3,
+  },
+  weekdayHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  weekdayLabel: {
+    flex: 1,
     textAlign: 'center',
-  },
-  daysScrollViewWrapper: {
-    width: '100%',
-    marginTop: 6,
-  },
-  daysScrollContent: {
-    paddingHorizontal: 38,
-    alignItems: 'center',
-  },
-  dayColumn: {
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    width: DAY_ITEM_WIDTH,
-  },
-  dayColumnActive: {
-    backgroundColor: '#1E2524',
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    opacity: 1,
-  },
-  dayColumnDimmed: {
-    opacity: 0.4,
-  },
-  dayNameText: {
-    fontFamily: FontFamily.medium,
+    fontFamily: FontFamily.semiBold,
     fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.5)',
-    marginBottom: 4,
-    textTransform: 'uppercase',
+    color: 'rgba(255, 255, 255, 0.4)',
+    letterSpacing: 0.5,
   },
-  dayNameTextActive: {
-    color: 'rgba(255, 255, 255, 0.85)',
+  calendarGrid: {
+    width: '100%',
   },
-  dayNumText: {
+  calendarWeekRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 2,
+  },
+  calendarDayCell: {
+    flex: 1,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  calendarDayPill: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  calendarDayPillSelected: {
+    backgroundColor: '#00D09E',
+    shadowColor: '#00D09E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  calendarDayPillToday: {
+    borderWidth: 1.5,
+    borderColor: '#00D09E',
+    backgroundColor: 'rgba(0, 208, 158, 0.12)',
+  },
+  calendarDayNum: {
+    fontFamily: FontFamily.medium,
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+  calendarDayNumSelected: {
     fontFamily: FontFamily.bold,
-    fontSize: 21,
-    color: '#FFFFFF',
+    color: '#02241D',
   },
-  dayNumTextActive: {
-    color: '#FFFFFF',
+  calendarDayNumToday: {
+    fontFamily: FontFamily.bold,
+    color: '#00D09E',
   },
-  dayTextDimmed: {
-    opacity: 0.7,
+  calendarDayNumOutside: {
+    color: 'rgba(255, 255, 255, 0.22)',
+    fontFamily: FontFamily.regular,
   },
 
   // Step 6: Descrição Input Card
