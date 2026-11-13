@@ -266,6 +266,39 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
   // Nome da despesa (para Diversos e categorias customizadas)
   const [expenseName, setExpenseName] = useState('');
 
+  // Datas que já têm receitas lançadas (formato DD/MM/YYYY)
+  const [receitaDates, setReceitaDates] = useState<Set<string>>(new Set());
+
+  const formatDateKey = (d: Date) => {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const loadReceitaDates = () => {
+    transactionsApi
+      .getTransactions({ type: 'receita', limit: 'all' })
+      .then((res) => {
+        if (res && res.success && Array.isArray(res.items)) {
+          const dates = new Set<string>();
+          res.items.forEach((t) => {
+            if (t.date) {
+              dates.add(t.date);
+            }
+            if (t.rawDate) {
+              const parsed = new Date(t.rawDate);
+              if (!isNaN(parsed.getTime())) {
+                dates.add(formatDateKey(parsed));
+              }
+            }
+          });
+          setReceitaDates(dates);
+        }
+      })
+      .catch(() => {});
+  };
+
   // Carrega categorias e entidades da base de dados
   useEffect(() => {
     categoriesApi.getCategories('despesa').then((res) => {
@@ -299,6 +332,8 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
         setSelectedSupplier(names[0]);
       }
     }).catch(() => { });
+
+    loadReceitaDates();
   }, []);
 
   // Data state - padrão: hoje
@@ -398,8 +433,11 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
     if (currentScreen === 'date') {
       setCalendarMonth(selectedDate.getMonth());
       setCalendarYear(selectedDate.getFullYear());
+      if (transactionType === 'receita') {
+        loadReceitaDates();
+      }
     }
-  }, [currentScreen]);
+  }, [currentScreen, transactionType]);
 
   // Navegação entre meses no calendário
   const handleMonthNav = (direction: 'next' | 'prev') => {
@@ -454,6 +492,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
       isCurrentMonth: boolean;
       isToday: boolean;
       isSelected: boolean;
+      hasReceita: boolean;
       key: string;
     }
 
@@ -478,6 +517,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
           d.getFullYear() === selectedDate.getFullYear() &&
           d.getMonth() === selectedDate.getMonth() &&
           d.getDate() === selectedDate.getDate(),
+        hasReceita: transactionType === 'receita' && receitaDates.has(formatDateKey(d)),
         key: `prev-${calendarYear}-${calendarMonth}-${dNum}`,
       });
     }
@@ -495,6 +535,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
           d.getFullYear() === selectedDate.getFullYear() &&
           d.getMonth() === selectedDate.getMonth() &&
           d.getDate() === selectedDate.getDate(),
+        hasReceita: transactionType === 'receita' && receitaDates.has(formatDateKey(d)),
         key: `curr-${calendarYear}-${calendarMonth}-${dNum}`,
       });
     }
@@ -513,6 +554,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
           d.getFullYear() === selectedDate.getFullYear() &&
           d.getMonth() === selectedDate.getMonth() &&
           d.getDate() === selectedDate.getDate(),
+        hasReceita: transactionType === 'receita' && receitaDates.has(formatDateKey(d)),
         key: `next-${calendarYear}-${calendarMonth}-${dNum}`,
       });
     }
@@ -522,7 +564,7 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
       weeks.push(days.slice(i, i + 7));
     }
     return weeks;
-  }, [calendarYear, calendarMonth, selectedDate, todayDate]);
+  }, [calendarYear, calendarMonth, selectedDate, todayDate, transactionType, receitaDates]);
 
   const formatSelectedDateBanner = (d: Date) => {
     const day = d.getDate();
@@ -700,6 +742,14 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
         dueDate: !isPaid ? selectedDate.toISOString().substring(0, 10) : undefined,
         description: description || undefined,
       });
+
+      if (transactionType === 'receita') {
+        setReceitaDates((prev) => {
+          const next = new Set(prev);
+          next.add(formatDateKey(selectedDate));
+          return next;
+        });
+      }
 
       if (!isPaid && res?.transaction?.id) {
         await scheduleInvoicePaymentReminders({
@@ -1374,6 +1424,17 @@ export const AddScreenView: React.FC<AddScreenViewProps> = ({ onClose }) => {
                                 >
                                   {item.dayNum}
                                 </Text>
+                                {item.hasReceita && (
+                                  <View
+                                    style={[
+                                      styles.calendarDayDot,
+                                      item.isSelected && styles.calendarDayDotSelected,
+                                      !item.isCurrentMonth &&
+                                        !item.isSelected &&
+                                        styles.calendarDayDotOutside,
+                                    ]}
+                                  />
+                                )}
                               </View>
                             </TouchableOpacity>
                           ))}
@@ -2072,6 +2133,20 @@ const styles = StyleSheet.create({
   calendarDayNumOutside: {
     color: 'rgba(255, 255, 255, 0.22)',
     fontFamily: FontFamily.regular,
+  },
+  calendarDayDot: {
+    position: 'absolute',
+    bottom: 4,
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 2.25,
+    backgroundColor: '#00D09E',
+  },
+  calendarDayDotSelected: {
+    backgroundColor: '#02241D',
+  },
+  calendarDayDotOutside: {
+    backgroundColor: 'rgba(0, 208, 158, 0.35)',
   },
 
   // Step 6: Descrição Input Card

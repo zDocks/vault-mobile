@@ -72,10 +72,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Vault ${{ github.ref_name }}
           body: |
-            - Melhorias no sistema de utilizacao de AI
-            - Gestao completa de faturas e despesas pendentes
-            - Sistema de Notificacoes
-            - Melhorias e correcoes
+            - Marcador visual no calendário nas datas com receitas já lançadas
+            - Seletor de data em formato calendário mensal
+            - Edição e eliminação completa de despesas, receitas e faturas
+            - Melhorias de desempenho e correções gerais
           draft: false
           prerelease: false
         env:
